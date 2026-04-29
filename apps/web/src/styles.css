@@ -93,3 +93,109 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
   .hero { display: grid; }
   .status-pill { white-space: normal; }
 }
+
+.checkbox-row {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 0.65rem;
+  color: #cbd5e1;
+  font-weight: 800;
+}
+
+.checkbox-row input {
+  width: auto;
+  accent-color: #22c55e;
+}
+
+button.start-set {
+  background: #22c55e;
+  color: #020617;
+}
+
+button.stop-set {
+  background: #ef4444;
+  color: #fff;
+}
+
+button.danger {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.small-button {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.set-table-panel {
+  margin-top: 1rem;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.table-header h2 {
+  margin: 0;
+}
+
+.table-totals {
+  display: grid;
+  gap: 0.25rem;
+  text-align: right;
+  color: #94a3b8;
+}
+
+.table-totals strong {
+  color: #e5e7eb;
+  font-size: 1.2rem;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.set-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 680px;
+}
+
+.set-table th,
+.set-table td {
+  text-align: left;
+  padding: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.set-table th {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.set-table td {
+  color: #e5e7eb;
+}
+
+.set-table tbody tr:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+@media (max-width: 720px) {
+  .table-header {
+    display: grid;
+  }
+
+  .table-totals {
+    text-align: left;
+  }
+}

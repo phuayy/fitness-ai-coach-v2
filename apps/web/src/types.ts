@@ -39,3 +39,12 @@ export interface CoachFrameState {
   fps: number;
   backendStatus: string;
 }
+
+export interface SetRecord {
+  id: string;
+  action: ExerciseType;
+  setNumber: number;
+  validActions: number;
+  totalReps: number;
+  completedAt: string;
+}

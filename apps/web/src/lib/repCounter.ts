@@ -76,7 +76,7 @@ function updatePushup(lm: NormalizedLandmark[], state: CounterState): CounterSta
   const rightElbow = angleDegrees(lm[12], lm[14], lm[16]);
   const elbowAngle = avg([leftElbow, rightElbow]);
   const visibility = avgVisibility([lm[11], lm[12], lm[13], lm[14], lm[15], lm[16], lm[23], lm[24]]);
-  const down = elbowAngle < 95;
+  const down = elbowAngle < 105;
   const up = elbowAngle > 155;
   const hipShoulderDelta = Math.abs(avg([lm[23].y, lm[24].y]) - avg([lm[11].y, lm[12].y]));
   const bodyLineOk = hipShoulderDelta < 0.28;
