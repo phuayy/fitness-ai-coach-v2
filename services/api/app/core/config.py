@@ -1,88 +1,120 @@
-from functools import lru_cache
+from __future__ import annotations
+
 import json
+from functools import lru_cache
 from typing import Annotated, Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
-def parse_string_list(value: Any, *, field_name: str) -> list[str]:
-    """Parse a settings field that may be a JSON list or comma-separated string.
+def parse_frontend_origins(value: Any) -> list[str]:
+    if value is None or value == "":
+        return ["http://localhost:5173"]
 
-    pydantic-settings parses complex types such as list[str] as JSON before
-    validators run. The Settings model uses NoDecode for frontend_origins so this
-    function can accept developer-friendly values such as:
-
-      FRONTEND_ORIGINS=http://localhost:5173,https://example.vercel.app
-
-    It also accepts strict JSON for teams that prefer platform-native JSON:
-
-      FRONTEND_ORIGINS=["http://localhost:5173","https://example.vercel.app"]
-    """
     if isinstance(value, list):
-        parsed = value
-    elif isinstance(value, str):
-        raw_value = value.strip()
-        if not raw_value:
-            return []
+        return [str(item).strip() for item in value if str(item).strip()]
 
-        if raw_value.startswith("["):
-            try:
-                decoded = json.loads(raw_value)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"{field_name} must be either a comma-separated string or a JSON array of strings."
-                ) from exc
+    raw = str(value).strip()
 
-            if not isinstance(decoded, list):
-                raise ValueError(f"{field_name} JSON value must be an array of strings.")
-            parsed = decoded
-        else:
-            parsed = raw_value.split(",")
-    else:
-        raise ValueError(f"{field_name} must be a string or a list of strings.")
+    if raw.startswith("["):
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValueError("FRONTEND_ORIGINS JSON value must be a list")
+        return [str(item).strip() for item in parsed if str(item).strip()]
 
-    origins = [str(item).strip() for item in parsed if str(item).strip()]
-    if not origins:
-        raise ValueError(f"{field_name} must contain at least one origin.")
-    return origins
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def normalize_database_url(value: Any) -> str | None:
+    raw = "" if value is None else str(value).strip().strip('"').strip("'")
+
+    disabled_values = {
+        "",
+        "disabled",
+        "__disabled__",
+        "none",
+        "null",
+        "placeholder",
+        "__placeholder__",
+        "<your-render-postgres-internal-database-url>",
+        "your-render-postgres-internal-database-url",
+    }
+
+    if raw.lower() in disabled_values:
+        return None
+
+    if raw.startswith("DATABASE_URL="):
+        raw = raw.split("=", 1)[1].strip()
+
+    lowered = raw.lower()
+
+    placeholder_tokens = [
+        "your-render-postgres",
+        "your-database-url",
+        "internal-database-url",
+        "user:password@host",
+        "<",
+        ">",
+    ]
+
+    if any(token in lowered for token in placeholder_tokens):
+        return None
+
+    if raw.startswith("postgres://"):
+        return raw.replace("postgres://", "postgresql+psycopg://", 1)
+
+    if raw.startswith("postgresql://"):
+        return raw.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    if raw.startswith("postgresql+psycopg://"):
+        return raw
+
+    if raw.startswith("sqlite:///") or raw.startswith("sqlite:////"):
+        return raw
+
+    return None
 
 
 class Settings(BaseSettings):
-    app_env: str = "local"
-    log_level: str = "INFO"
-    jwt_secret: str = "dev-secret-change-me"
-    jwt_expires_minutes: int = 60 * 24 * 7
-    database_url: str = "sqlite:///./fitness_ai.sqlite3"
-
-    # NoDecode is important here. Without it, pydantic-settings tries to parse
-    # FRONTEND_ORIGINS as JSON before our validator receives the value, so a
-    # normal comma-separated .env value causes a SettingsError at app startup.
-    frontend_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:5173"]
-    )
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
-        case_sensitive=False,
+    )
+
+    app_env: str = "local"
+    log_level: str = "INFO"
+
+    jwt_secret: str = "replace-this-with-a-long-random-secret"
+    jwt_expires_minutes: int = 10080
+
+    db_enabled: bool = True
+    database_url: str = "sqlite:///./fitness_ai.sqlite3"
+
+    frontend_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:5173"]
     )
 
     @field_validator("frontend_origins", mode="before")
     @classmethod
-    def parse_frontend_origins(cls, value: Any) -> list[str]:
-        return parse_string_list(value, field_name="FRONTEND_ORIGINS")
+    def validate_frontend_origins(cls, value: Any) -> list[str]:
+        return parse_frontend_origins(value)
 
     @property
-    def sqlalchemy_database_url(self) -> str:
-        # Render and several hosted databases may expose postgres://.
-        # SQLAlchemy expects postgresql+psycopg:// when using psycopg 3.
-        if self.database_url.startswith("postgres://"):
-            return self.database_url.replace("postgres://", "postgresql+psycopg://", 1)
-        if self.database_url.startswith("postgresql://"):
-            return self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        return self.database_url
+    def normalized_database_url(self) -> str | None:
+        if not self.db_enabled:
+            return None
+
+        return normalize_database_url(self.database_url)
+
+    @property
+    def database_available(self) -> bool:
+        return self.normalized_database_url is not None
+
+    @property
+    def sqlalchemy_database_url(self) -> str | None:
+        return self.normalized_database_url
 
 
 @lru_cache

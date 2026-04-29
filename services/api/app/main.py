@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.db import create_db_and_tables
 from app.routers import advice, auth, health, sessions
+from app.core.db import create_db_and_tables, is_database_available
 
 settings = get_settings()
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
@@ -23,6 +24,22 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+@app.on_event("startup")
+def on_startup() -> None:
+    create_db_and_tables()
+
+@app.get("/health")
+def health() -> dict:
+    return {
+        "status": "ok",
+        "environment": settings.app_env,
+        "database": {
+            "enabled": settings.db_enabled,
+            "available": is_database_available(),
+            "mode": "active" if is_database_available() else "placeholder",
+        },
+    }
 
 app.add_middleware(
     CORSMiddleware,
