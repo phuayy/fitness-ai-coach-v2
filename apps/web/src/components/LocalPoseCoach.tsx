@@ -4,14 +4,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { drawPose } from "../lib/drawPose";
 import { createCounterState, updateCounter } from "../lib/repCounter";
 import type { CoachFrameState, ExerciseType, SetRecord } from "../types";
+import { getExercisePoseQuality } from "../lib/poseQuality";
 
 interface Props {
   token?: string | null;
   onSessionSaved?: () => void;
 }
 
-const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task";
-const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm";
+const MODEL_URL =
+  import.meta.env.VITE_POSE_MODEL_URL || "/models/pose_landmarker_full.task";
+
+const WASM_URL =
+  import.meta.env.VITE_MEDIAPIPE_WASM_URL ||
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm";
 
 function exerciseLabel(value: ExerciseType): string {
   return value === "pushup" ? "Push-up" : "Squat";
@@ -136,9 +141,9 @@ export function LocalPoseCoach(_props: Props) {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
         runningMode: "VIDEO",
         numPoses: 1,
-        minPoseDetectionConfidence: 0.5,
-        minPosePresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5
+        minPoseDetectionConfidence: 0.6,
+        minPosePresenceConfidence: 0.55,
+        minTrackingConfidence: 0.6
       });
     } catch {
       return await PoseLandmarker.createFromOptions(vision, {
@@ -205,12 +210,17 @@ export function LocalPoseCoach(_props: Props) {
       const result: PoseLandmarkerResult = landmarker.detectForVideo(video, performance.now());
       const ctx = canvas.getContext("2d");
       const landmarks = result.landmarks[0] ?? [];
+      const quality = getExercisePoseQuality(exercise, landmarks);
 
       if (ctx) {
-        drawPose(ctx, landmarks, width, height);
+        if (quality.ok) {
+          drawPose(ctx, landmarks, width, height);
+        } else {
+          ctx.clearRect(0, 0, width, height);
+        }
       }
 
-      if (landmarks.length && setActiveRef.current) {
+      if (quality.ok && setActiveRef.current) {
         const previousValidReps = counterRef.current.validReps;
 
         counterRef.current = updateCounter(
@@ -222,8 +232,14 @@ export function LocalPoseCoach(_props: Props) {
         if (counterRef.current.validReps > previousValidReps) {
           speakValidCount(counterRef.current.validReps);
         }
+      } else if (!quality.ok) {
+        counterRef.current = {
+          ...counterRef.current,
+          lastFeedback: quality.feedback,
+          lastConfidence: quality.confidence,
+          lastPayload: undefined
+        };
       }
-    }
 
     const now = performance.now();
 

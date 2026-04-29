@@ -71,24 +71,45 @@ function updateSquat(lm: NormalizedLandmark[], state: CounterState): CounterStat
   return { stage, reps, validReps, lastFeedback: feedback, lastConfidence: confidence, lastPayload: payload };
 }
 
+function sideScore(points: NormalizedLandmark[]): number {
+  return avgVisibility(points);
+}
+
 function updatePushup(lm: NormalizedLandmark[], state: CounterState): CounterState {
-  const leftElbow = angleDegrees(lm[11], lm[13], lm[15]);
-  const rightElbow = angleDegrees(lm[12], lm[14], lm[16]);
-  const elbowAngle = avg([leftElbow, rightElbow]);
-  const visibility = avgVisibility([lm[11], lm[12], lm[13], lm[14], lm[15], lm[16], lm[23], lm[24]]);
-  const down = elbowAngle < 105;
+  const leftElbowAngle = angleDegrees(lm[11], lm[13], lm[15]);
+  const rightElbowAngle = angleDegrees(lm[12], lm[14], lm[16]);
+
+  const leftVisibility = sideScore([lm[11], lm[13], lm[15], lm[23]]);
+  const rightVisibility = sideScore([lm[12], lm[14], lm[16], lm[24]]);
+
+  const useLeft = leftVisibility >= rightVisibility;
+
+  const elbowAngle = useLeft ? leftElbowAngle : rightElbowAngle;
+
+  const shoulder = useLeft ? lm[11] : lm[12];
+  const hip = useLeft ? lm[23] : lm[24];
+
+  const confidence = clamp(Math.max(leftVisibility, rightVisibility));
+
+  const down = elbowAngle < 95;
   const up = elbowAngle > 155;
-  const hipShoulderDelta = Math.abs(avg([lm[23].y, lm[24].y]) - avg([lm[11].y, lm[12].y]));
+
+  const hipShoulderDelta = Math.abs(hip.y - shoulder.y);
   const bodyLineOk = hipShoulderDelta < 0.28;
-  const confidence = clamp(visibility);
+
   let feedback = state.lastFeedback;
   let stage = state.stage;
   let reps = state.reps;
   let validReps = state.validReps;
   let payload: RepPayload | undefined;
 
-  if (confidence < 0.45) {
-    return { ...state, lastFeedback: "Move upper body fully into frame.", lastConfidence: confidence, lastPayload: undefined };
+  if (confidence < 0.4) {
+    return {
+      ...state,
+      lastFeedback: "Move shoulder, elbow, wrist, and hip into view.",
+      lastConfidence: confidence,
+      lastPayload: undefined
+    };
   }
 
   if ((stage === "idle" || stage === "up") && down) {
@@ -98,20 +119,38 @@ function updatePushup(lm: NormalizedLandmark[], state: CounterState): CounterSta
 
   if (stage === "down" && up) {
     reps += 1;
+
     const isValid = bodyLineOk;
+
     if (isValid) validReps += 1;
-    feedback = isValid ? `Rep ${reps}: counted.` : `Rep ${reps}: counted, but keep a straighter body line.`;
+
+    feedback = isValid
+      ? `Rep ${reps}: counted.`
+      : `Rep ${reps}: counted, but keep a straighter body line.`;
+
     payload = {
       rep_index: reps,
       is_valid: isValid,
       confidence,
       feedback,
-      metrics: { elbow_angle: Math.round(elbowAngle), body_line_delta: Number(hipShoulderDelta.toFixed(3)), exercise: "pushup" }
+      metrics: {
+        elbow_angle: Math.round(elbowAngle),
+        body_line_delta: Number(hipShoulderDelta.toFixed(3)),
+        exercise: "pushup"
+      }
     };
+
     stage = "up";
   } else if (stage !== "down") {
     feedback = elbowAngle < 135 ? "Lower with control." : "Ready. Start your push-up.";
   }
 
-  return { stage, reps, validReps, lastFeedback: feedback, lastConfidence: confidence, lastPayload: payload };
+  return {
+    stage,
+    reps,
+    validReps,
+    lastFeedback: feedback,
+    lastConfidence: confidence,
+    lastPayload: payload
+  };
 }
