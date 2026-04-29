@@ -240,6 +240,7 @@ export function LocalPoseCoach(_props: Props) {
           lastPayload: undefined
         };
       }
+    }
 
     const now = performance.now();
 
