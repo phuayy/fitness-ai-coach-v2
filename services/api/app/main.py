@@ -5,11 +5,11 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import advice
-from app.api.routes import auth
-from app.api.routes import health as health_routes
-from app.api.routes import reps
-from app.api.routes import sessions
+from app.routers import advice
+from app.routers import auth
+from app.routers import health as health_routes
+# from app.api.routers import reps
+from app.routers import sessions
 from app.core.config import get_settings
 from app.core.db import create_db_and_tables
 
@@ -45,5 +45,5 @@ def on_startup() -> None:
 app.include_router(health_routes.router)
 app.include_router(auth.router, prefix="/auth")
 app.include_router(sessions.router, prefix="/sessions")
-app.include_router(reps.router, prefix="/reps")
+# app.include_router(reps.router, prefix="/reps")
 app.include_router(advice.router, prefix="/advice")

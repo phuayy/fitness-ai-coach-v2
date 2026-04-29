@@ -9,6 +9,8 @@ settings = get_settings()
 
 @router.get("/health")
 def health_check() -> dict:
+    settings = get_settings()
+
     return {
         "status": "ok",
         "environment": settings.app_env,
