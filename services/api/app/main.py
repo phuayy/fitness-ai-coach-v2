@@ -1,60 +1,49 @@
+from __future__ import annotations
+
 import logging
-from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.routes import advice
+from app.api.routes import auth
+from app.api.routes import health as health_routes
+from app.api.routes import reps
+from app.api.routes import sessions
 from app.core.config import get_settings
 from app.core.db import create_db_and_tables
-from app.routers import advice, auth, health, sessions
-from app.core.db import create_db_and_tables, is_database_available
 
 settings = get_settings()
-logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(levelname)s:%(name)s:%(message)s",
+)
+
 logger = logging.getLogger(__name__)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("Starting Fitness AI API in %s mode", settings.app_env)
-    create_db_and_tables()
-    yield
-
 
 app = FastAPI(
     title="Fitness AI Local Pose Coach API",
-    version="1.0.0",
-    lifespan=lifespan
+    version="0.1.0",
+    description="Backend API for account, session, rep-history, and AI advice storage.",
 )
-
-@app.on_event("startup")
-def on_startup() -> None:
-    create_db_and_tables()
-
-@app.get("/health")
-def health() -> dict:
-    return {
-        "status": "ok",
-        "environment": settings.app_env,
-        "database": {
-            "enabled": settings.db_enabled,
-            "available": is_database_available(),
-            "mode": "active" if is_database_available() else "placeholder",
-        },
-    }
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.frontend_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
-app.include_router(health.router)
-app.include_router(auth.router)
-app.include_router(sessions.router)
-app.include_router(advice.router)
+
+@app.on_event("startup")
+def on_startup() -> None:
+    create_db_and_tables()
 
 
-@app.get("/")
-def root() -> dict[str, str]:
-    return {"name": "Fitness AI Local Pose Coach API", "docs": "/docs"}
+app.include_router(health_routes.router)
+app.include_router(auth.router, prefix="/auth")
+app.include_router(sessions.router, prefix="/sessions")
+app.include_router(reps.router, prefix="/reps")
+app.include_router(advice.router, prefix="/advice")
