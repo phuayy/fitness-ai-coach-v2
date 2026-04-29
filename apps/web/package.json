@@ -4,13 +4,13 @@
   "version": "1.0.0",
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+  "node": "22.x"
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview --host 0.0.0.0",
-    "typecheck": "tsc -b --pretty"
+    "typecheck": "tsc -b --pretty false",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.34",
