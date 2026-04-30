@@ -1,18 +1,39 @@
-import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import {
+  FilesetResolver,
+  ObjectDetector,
+  PoseLandmarker
+} from "@mediapipe/tasks-vision";
 import type { PoseLandmarkerResult } from "@mediapipe/tasks-vision";
 import { useEffect, useMemo, useRef, useState } from "react";
+
 import { drawPose } from "../lib/drawPose";
+import { humanGate } from "../lib/humanGate";
+import { getExercisePoseQuality } from "../lib/poseQuality";
 import { createCounterState, updateCounter } from "../lib/repCounter";
 import type { CoachFrameState, ExerciseType, SetRecord } from "../types";
-import { getExercisePoseQuality } from "../lib/poseQuality";
 
 interface Props {
   token?: string | null;
   onSessionSaved?: () => void;
 }
 
+type VisionFileset = Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
+
 const MODEL_URL =
   import.meta.env.VITE_POSE_MODEL_URL || "/models/pose_landmarker_full.task";
+
+const PERSON_MODEL_URL =
+  import.meta.env.VITE_PERSON_MODEL_URL || "/models/efficientdet_lite0_uint8.tflite";
+
+const ENABLE_PERSON_GATE =
+  import.meta.env.VITE_ENABLE_PERSON_GATE !== "false";
+
+const ALLOW_PARTIAL_POSE_FALLBACK =
+  import.meta.env.VITE_ALLOW_PARTIAL_POSE_FALLBACK === "true";
+
+const PERSON_DETECT_EVERY_MS = Number(
+  import.meta.env.VITE_PERSON_DETECT_EVERY_MS || 250
+);
 
 const WASM_URL =
   import.meta.env.VITE_MEDIAPIPE_WASM_URL ||
@@ -22,14 +43,93 @@ function exerciseLabel(value: ExerciseType): string {
   return value === "pushup" ? "Push-up" : "Squat";
 }
 
+async function createLandmarker(vision: VisionFileset): Promise<PoseLandmarker> {
+  try {
+    return await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: MODEL_URL,
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO",
+      numPoses: 1,
+      minPoseDetectionConfidence: 0.65,
+      minPosePresenceConfidence: 0.6,
+      minTrackingConfidence: 0.65
+    });
+  } catch (gpuError) {
+    console.warn("[pose] GPU landmarker failed, retrying CPU.", gpuError);
+
+    return await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: MODEL_URL,
+        delegate: "CPU"
+      },
+      runningMode: "VIDEO",
+      numPoses: 1,
+      minPoseDetectionConfidence: 0.55,
+      minPosePresenceConfidence: 0.55,
+      minTrackingConfidence: 0.55
+    });
+  }
+}
+
+async function createPersonDetector(
+  vision: VisionFileset
+): Promise<ObjectDetector | null> {
+  if (!ENABLE_PERSON_GATE) return null;
+
+  try {
+    return await ObjectDetector.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: PERSON_MODEL_URL,
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO",
+      maxResults: 3,
+      scoreThreshold: 0.5,
+      categoryAllowlist: ["person"]
+    });
+  } catch (gpuError) {
+    console.warn("[person-gate] GPU detector failed, retrying CPU.", gpuError);
+
+    try {
+      return await ObjectDetector.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: PERSON_MODEL_URL,
+          delegate: "CPU"
+        },
+        runningMode: "VIDEO",
+        maxResults: 3,
+        scoreThreshold: 0.5,
+        categoryAllowlist: ["person"]
+      });
+    } catch (cpuError) {
+      console.warn("[person-gate] Person detector unavailable.", cpuError);
+      return null;
+    }
+  }
+}
+
 export function LocalPoseCoach(_props: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const landmarkerRef = useRef<PoseLandmarker | null>(null);
+  const objectDetectorRef = useRef<ObjectDetector | null>(null);
+
+  const lastDetectorResultRef = useRef<unknown | null>(null);
+  const lastPersonDetectTsRef = useRef(0);
+
   const animationRef = useRef<number | null>(null);
   const counterRef = useRef(createCounterState());
   const lastVideoTimeRef = useRef(-1);
-  const framesRef = useRef({ count: 0, lastTs: performance.now(), fps: 0, lastUiTs: 0 });
+
+  const framesRef = useRef({
+    count: 0,
+    lastTs: performance.now(),
+    fps: 0,
+    lastUiTs: 0
+  });
 
   const exerciseRef = useRef<ExerciseType>("squat");
   const sessionActiveRef = useRef(false);
@@ -41,7 +141,13 @@ export function LocalPoseCoach(_props: Props) {
   const [exercise, setExercise] = useState<ExerciseType>("squat");
   const [cameraStatus, setCameraStatus] = useState("Camera not started");
   const [modelStatus, setModelStatus] = useState("Model loading...");
-  const [sessionStatus, setSessionStatus] = useState("Click Start session to begin temporary local set tracking.");
+  const [personStatus, setPersonStatus] = useState(
+    ENABLE_PERSON_GATE ? "Person gate loading..." : "Person gate disabled"
+  );
+  const [sessionStatus, setSessionStatus] = useState(
+    "Click Start session to begin temporary local set tracking."
+  );
+
   const [sessionActive, setSessionActive] = useState(false);
   const [setActive, setSetActive] = useState(false);
   const [setRows, setSetRows] = useState<SetRecord[]>([]);
@@ -89,18 +195,48 @@ export function LocalPoseCoach(_props: Props) {
         }
 
         const video = videoRef.current;
-        if (!video) return;
+        if (!video) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
 
         video.srcObject = stream;
         await video.play();
         setCameraStatus("Camera running locally");
 
-        landmarkerRef.current = await createLandmarker();
-        setModelStatus("Pose model ready");
+        const vision = await FilesetResolver.forVisionTasks(WASM_URL);
+
+        const landmarker = await createLandmarker(vision);
+        const objectDetector = await createPersonDetector(vision);
+
+        if (cancelled) {
+          landmarker.close();
+          objectDetector?.close();
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        landmarkerRef.current = landmarker;
+        objectDetectorRef.current = objectDetector;
+
+        if (!ENABLE_PERSON_GATE) {
+          setModelStatus("Pose model ready");
+          setPersonStatus("Person gate disabled by environment");
+        } else if (objectDetector) {
+          setModelStatus("Pose model + person gate ready");
+          setPersonStatus("Person gate ready");
+        } else {
+          setModelStatus("Pose model ready; person gate unavailable");
+          setPersonStatus("Person gate unavailable. Reps will not count unless fallback is enabled.");
+        }
+
         runLoop();
       } catch (error) {
-        setCameraStatus(error instanceof Error ? error.message : "Camera/model startup failed");
+        setCameraStatus(
+          error instanceof Error ? error.message : "Camera/model startup failed"
+        );
         setModelStatus("Not ready");
+        setPersonStatus("Person gate not ready");
       }
     }
 
@@ -108,12 +244,20 @@ export function LocalPoseCoach(_props: Props) {
 
     return () => {
       cancelled = true;
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
 
       const stream = videoRef.current?.srcObject as MediaStream | null;
       stream?.getTracks().forEach((track) => track.stop());
 
       landmarkerRef.current?.close();
+      objectDetectorRef.current?.close();
+
+      landmarkerRef.current = null;
+      objectDetectorRef.current = null;
+      lastDetectorResultRef.current = null;
 
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
@@ -132,30 +276,6 @@ export function LocalPoseCoach(_props: Props) {
   useEffect(() => {
     voiceEnabledRef.current = voiceEnabled;
   }, [voiceEnabled]);
-
-  async function createLandmarker(): Promise<PoseLandmarker> {
-    const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-
-    try {
-      return await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-        runningMode: "VIDEO",
-        numPoses: 1,
-        minPoseDetectionConfidence: 0.6,
-        minPosePresenceConfidence: 0.55,
-        minTrackingConfidence: 0.6
-      });
-    } catch {
-      return await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
-        runningMode: "VIDEO",
-        numPoses: 1,
-        minPoseDetectionConfidence: 0.5,
-        minPosePresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      });
-    }
-  }
 
   function speakValidCount(count: number) {
     if (!voiceEnabledRef.current) return;
@@ -196,31 +316,88 @@ export function LocalPoseCoach(_props: Props) {
       return;
     }
 
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.currentTime !== lastVideoTimeRef.current) {
+    if (
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      video.currentTime !== lastVideoTimeRef.current
+    ) {
       lastVideoTimeRef.current = video.currentTime;
 
       const width = video.videoWidth || 1280;
       const height = video.videoHeight || 720;
+      const now = performance.now();
 
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
       }
 
-      const result: PoseLandmarkerResult = landmarker.detectForVideo(video, performance.now());
-      const ctx = canvas.getContext("2d");
-      const landmarks = result.landmarks[0] ?? [];
-      const quality = getExercisePoseQuality(exercise, landmarks);
+      const detector = objectDetectorRef.current;
 
-      if (ctx) {
-        if (quality.ok) {
-          drawPose(ctx, landmarks, width, height);
-        } else {
-          ctx.clearRect(0, 0, width, height);
+      if (
+        ENABLE_PERSON_GATE &&
+        detector &&
+        now - lastPersonDetectTsRef.current >= PERSON_DETECT_EVERY_MS
+      ) {
+        try {
+          lastDetectorResultRef.current = detector.detectForVideo(video, now);
+          lastPersonDetectTsRef.current = now;
+        } catch (error) {
+          console.warn("[person-gate] Frame detection failed.", error);
+          lastDetectorResultRef.current = null;
         }
       }
 
-      if (quality.ok && setActiveRef.current) {
+      const result: PoseLandmarkerResult = landmarker.detectForVideo(video, now);
+      const landmarks = result.landmarks[0] ?? [];
+
+      const rawHuman = ENABLE_PERSON_GATE
+        ? humanGate(
+            exerciseRef.current,
+            landmarks,
+            lastDetectorResultRef.current,
+            width,
+            height
+          )
+        : {
+            ok: landmarks.length >= 33,
+            confidence: landmarks.length >= 33 ? 1 : 0,
+            feedback: "Person gate disabled."
+          };
+
+      const human =
+        ENABLE_PERSON_GATE &&
+        !ALLOW_PARTIAL_POSE_FALLBACK &&
+        !rawHuman.personBox
+          ? {
+              ...rawHuman,
+              ok: false,
+              confidence: Math.min(rawHuman.confidence, 0.2),
+              feedback: detector
+                ? "No confirmed human object detected. Reps are paused."
+                : "Person detector unavailable. Reps are paused."
+            }
+          : rawHuman;
+
+      const quality = human.ok
+        ? getExercisePoseQuality(exerciseRef.current, landmarks)
+        : {
+            ok: false,
+            feedback: human.feedback,
+            confidence: human.confidence
+          };
+
+      const shouldDrawAndCount = human.ok && quality.ok;
+      const ctx = canvas.getContext("2d");
+
+      if (ctx) {
+        ctx.clearRect(0, 0, width, height);
+
+        if (shouldDrawAndCount) {
+          drawPose(ctx, landmarks, width, height);
+        }
+      }
+
+      if (shouldDrawAndCount && setActiveRef.current) {
         const previousValidReps = counterRef.current.validReps;
 
         counterRef.current = updateCounter(
@@ -232,7 +409,7 @@ export function LocalPoseCoach(_props: Props) {
         if (counterRef.current.validReps > previousValidReps) {
           speakValidCount(counterRef.current.validReps);
         }
-      } else if (!quality.ok) {
+      } else if (!shouldDrawAndCount) {
         counterRef.current = {
           ...counterRef.current,
           lastFeedback: quality.feedback,
@@ -240,36 +417,36 @@ export function LocalPoseCoach(_props: Props) {
           lastPayload: undefined
         };
       }
-    }
 
-    const now = performance.now();
+      framesRef.current.count += 1;
 
-    framesRef.current.count += 1;
+      if (now - framesRef.current.lastTs >= 1000) {
+        framesRef.current.fps = framesRef.current.count;
+        framesRef.current.count = 0;
+        framesRef.current.lastTs = now;
+      }
 
-    if (now - framesRef.current.lastTs >= 1000) {
-      framesRef.current.fps = framesRef.current.count;
-      framesRef.current.count = 0;
-      framesRef.current.lastTs = now;
-    }
+      if (now - framesRef.current.lastUiTs > 180) {
+        framesRef.current.lastUiTs = now;
 
-    if (now - framesRef.current.lastUiTs > 180) {
-      framesRef.current.lastUiTs = now;
+        const counter = counterRef.current;
 
-      const counter = counterRef.current;
+        setPersonStatus(human.feedback);
 
-      setCoachState({
-        reps: counter.reps,
-        validReps: counter.validReps,
-        stage: counter.stage,
-        feedback: counter.lastFeedback,
-        confidence: counter.lastConfidence,
-        fps: framesRef.current.fps,
-        backendStatus: setActiveRef.current
-          ? `set ${nextSetNumberRef.current} active`
-          : sessionActiveRef.current
-            ? "session active"
-            : "local only"
-      });
+        setCoachState({
+          reps: counter.reps,
+          validReps: counter.validReps,
+          stage: counter.stage,
+          feedback: counter.lastFeedback,
+          confidence: counter.lastConfidence,
+          fps: framesRef.current.fps,
+          backendStatus: setActiveRef.current
+            ? `set ${nextSetNumberRef.current} active`
+            : sessionActiveRef.current
+              ? "session active"
+              : "local only"
+        });
+      }
     }
 
     animationRef.current = requestAnimationFrame(runLoop);
@@ -310,7 +487,9 @@ export function LocalPoseCoach(_props: Props) {
       reps: 0,
       validReps: 0,
       stage: "idle",
-      feedback: `Set ${nextSetNumberRef.current} started. Begin ${exerciseLabel(exerciseRef.current)}.`
+      feedback: `Set ${nextSetNumberRef.current} started. Begin ${exerciseLabel(
+        exerciseRef.current
+      )}.`
     }));
 
     setSessionStatus(`Set ${nextSetNumberRef.current} active. Valid actions will be announced.`);
@@ -444,10 +623,22 @@ export function LocalPoseCoach(_props: Props) {
           </label>
 
           <div className="metric-grid">
-            <div><span>Current Reps</span><strong>{coachState.reps}</strong></div>
-            <div><span>Current Valid</span><strong>{coachState.validReps}</strong></div>
-            <div><span>FPS</span><strong>{coachState.fps}</strong></div>
-            <div><span>Confidence</span><strong>{Math.round(coachState.confidence * 100)}%</strong></div>
+            <div>
+              <span>Current Reps</span>
+              <strong>{coachState.reps}</strong>
+            </div>
+            <div>
+              <span>Current Valid</span>
+              <strong>{coachState.validReps}</strong>
+            </div>
+            <div>
+              <span>FPS</span>
+              <strong>{coachState.fps}</strong>
+            </div>
+            <div>
+              <span>Confidence</span>
+              <strong>{Math.round(coachState.confidence * 100)}%</strong>
+            </div>
           </div>
 
           <div className="feedback-box">
@@ -478,10 +669,26 @@ export function LocalPoseCoach(_props: Props) {
           </div>
 
           <dl className="status-list">
-            <div><dt>Camera</dt><dd>{cameraStatus}</dd></div>
-            <div><dt>Model</dt><dd>{modelStatus}</dd></div>
-            <div><dt>Mode</dt><dd>{coachState.backendStatus}</dd></div>
-            <div><dt>Session</dt><dd>{sessionStatus}</dd></div>
+            <div>
+              <dt>Camera</dt>
+              <dd>{cameraStatus}</dd>
+            </div>
+            <div>
+              <dt>Model</dt>
+              <dd>{modelStatus}</dd>
+            </div>
+            <div>
+              <dt>Human gate</dt>
+              <dd>{personStatus}</dd>
+            </div>
+            <div>
+              <dt>Mode</dt>
+              <dd>{coachState.backendStatus}</dd>
+            </div>
+            <div>
+              <dt>Session</dt>
+              <dd>{sessionStatus}</dd>
+            </div>
           </dl>
         </aside>
       </section>
@@ -495,13 +702,16 @@ export function LocalPoseCoach(_props: Props) {
 
           <div className="table-totals">
             <span>Next set: {nextSetNumber}</span>
-            <strong>{tableTotals.validActions}/{tableTotals.totalReps} valid</strong>
+            <strong>
+              {tableTotals.validActions}/{tableTotals.totalReps} valid
+            </strong>
           </div>
         </div>
 
         {setRows.length === 0 ? (
           <p className="hint">
-            No sets recorded yet. Start a session, click Start Set, perform reps, then click Stop Set.
+            No sets recorded yet. Start a session, click Start Set, perform reps,
+            then click Stop Set.
           </p>
         ) : (
           <div className="table-scroll">
