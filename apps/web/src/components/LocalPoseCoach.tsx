@@ -12,6 +12,11 @@ import { drawPose } from "../lib/drawPose";
 import { humanGate } from "../lib/humanGate";
 import { getExercisePoseQuality } from "../lib/poseQuality";
 import { createCounterState, updateCounter } from "../lib/repCounter";
+import {
+  createCameraFrame,
+  DEFAULT_CAMERA_FRAME,
+  useAdaptiveVideoLayout
+} from "../lib/useAdaptiveVideoLayout";
 import type { CoachFrameState, ExerciseType, SetRecord } from "../types";
 
 type VisionFileset = Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
@@ -141,6 +146,7 @@ async function createPersonDetector(
 }
 
 export function LocalPoseCoach() {
+  const videoCardRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -163,6 +169,7 @@ export function LocalPoseCoach() {
   });
 
   const exerciseRef = useRef<ExerciseType>("squat");
+  const cameraFrameRef = useRef(DEFAULT_CAMERA_FRAME);
   const sessionActiveRef = useRef(false);
   const setActiveRef = useRef(false);
   const setRowsRef = useRef<SetRecord[]>([]);
@@ -170,6 +177,7 @@ export function LocalPoseCoach() {
   const voiceEnabledRef = useRef(true);
 
   const [exercise, setExercise] = useState<ExerciseType>("squat");
+  const [cameraFrame, setCameraFrame] = useState(DEFAULT_CAMERA_FRAME);
   const [cameraStatus, setCameraStatus] = useState("Camera not started");
   const [modelStatus, setModelStatus] = useState("Model loading...");
   const [personStatus, setPersonStatus] = useState(
@@ -196,6 +204,12 @@ export function LocalPoseCoach() {
     fps: 0,
     backendStatus: "local only"
   });
+
+  const videoLayout = useAdaptiveVideoLayout(videoCardRef, cameraFrame);
+  const cameraStatusText =
+    cameraStatus === "Camera running locally"
+      ? `${cameraStatus} (${cameraFrame.width} x ${cameraFrame.height}, ${cameraFrame.orientation})`
+      : cameraStatus;
 
   const tableTotals = useMemo(() => {
     return setRows.reduce(
@@ -235,6 +249,7 @@ export function LocalPoseCoach() {
 
         video.srcObject = stream;
         await video.play();
+        syncCameraFrame(video.videoWidth, video.videoHeight);
         setCameraStatus("Camera running locally");
 
         setModelStatus(
@@ -358,6 +373,30 @@ export function LocalPoseCoach() {
     window.speechSynthesis.speak(utterance);
   }
 
+  function syncCameraFrame(width: number, height: number) {
+    if (!width || !height) return;
+
+    const nextFrame = createCameraFrame(width, height);
+    const currentFrame = cameraFrameRef.current;
+
+    if (
+      nextFrame.width === currentFrame.width &&
+      nextFrame.height === currentFrame.height
+    ) {
+      return;
+    }
+
+    cameraFrameRef.current = nextFrame;
+    setCameraFrame(nextFrame);
+  }
+
+  function syncCameraFrameFromVideo() {
+    const video = videoRef.current;
+    if (!video) return;
+
+    syncCameraFrame(video.videoWidth, video.videoHeight);
+  }
+
   function resetLiveCounter(feedback: string) {
     const nextCounter = createCounterState();
     nextCounter.lastFeedback = feedback;
@@ -390,6 +429,8 @@ export function LocalPoseCoach() {
       const width = video.videoWidth || 1280;
       const height = video.videoHeight || 720;
       const now = performance.now();
+
+      syncCameraFrame(width, height);
 
       if (now - lastPoseDetectTsRef.current < POSE_DETECT_EVERY_MS) {
         animationRef.current = requestAnimationFrame(runLoop);
@@ -657,9 +698,25 @@ export function LocalPoseCoach() {
   return (
     <>
       <section className="coach-grid">
-        <div className="video-card">
-          <div className="video-shell">
-            <video ref={videoRef} playsInline muted className="camera-video" />
+        <div
+          ref={videoCardRef}
+          className="video-card"
+          data-camera-orientation={cameraFrame.orientation}
+        >
+          <div
+            className="video-shell"
+            data-camera-orientation={cameraFrame.orientation}
+            data-camera-resolution={`${cameraFrame.width}x${cameraFrame.height}`}
+            style={videoLayout.style}
+          >
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className="camera-video"
+              onLoadedMetadata={syncCameraFrameFromVideo}
+              onResize={syncCameraFrameFromVideo}
+            />
             <canvas ref={canvasRef} className="pose-canvas" />
           </div>
         </div>
@@ -738,7 +795,7 @@ export function LocalPoseCoach() {
           <dl className="status-list">
             <div>
               <dt>Camera</dt>
-              <dd>{cameraStatus}</dd>
+              <dd>{cameraStatusText}</dd>
             </div>
             <div>
               <dt>Model</dt>
