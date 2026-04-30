@@ -72,6 +72,10 @@ function usefulIndicesForExercise(exercise: ExerciseType): number[] {
   return [23, 24, 25, 26, 27, 28];
 }
 
+function minVisibleUsefulPointsForExercise(exercise: ExerciseType): number {
+  return exercise === "pushup" ? 4 : 3;
+}
+
 function hasExercisePoseStructure(
   exercise: ExerciseType,
   landmarks: NormalizedLandmark[]
@@ -238,6 +242,7 @@ export function humanGate(
   const usefulLandmarks = usefulIndices.map((index) => landmarks[index]).filter((point): point is NormalizedLandmark => Boolean(point));
   const visibleUsefulCount = usefulLandmarks.filter(visible).length;
   const usefulVisibility = avgVisibility(usefulLandmarks);
+  const minVisibleUsefulPoints = minVisibleUsefulPointsForExercise(exercise);
 
   if (!hasExercisePoseStructure(exercise, landmarks)) {
     return {
@@ -250,7 +255,7 @@ export function humanGate(
     };
   }
 
-  if (visibleUsefulCount < HUMAN_GATE_CONFIG.minVisibleUsefulPoints) {
+  if (visibleUsefulCount < minVisibleUsefulPoints) {
     return {
       ok: false,
       confidence: clamp(usefulVisibility),

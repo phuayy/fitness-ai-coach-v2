@@ -43,7 +43,7 @@ def on_startup() -> None:
 
 
 app.include_router(health_routes.router)
-app.include_router(auth.router, prefix="/auth")
-app.include_router(sessions.router, prefix="/sessions")
+app.include_router(auth.router)
+app.include_router(sessions.router)
 # app.include_router(reps.router, prefix="/reps")
-app.include_router(advice.router, prefix="/advice")
+app.include_router(advice.router)

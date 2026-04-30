@@ -12,11 +12,6 @@ import { getExercisePoseQuality } from "../lib/poseQuality";
 import { createCounterState, updateCounter } from "../lib/repCounter";
 import type { CoachFrameState, ExerciseType, SetRecord } from "../types";
 
-interface Props {
-  token?: string | null;
-  onSessionSaved?: () => void;
-}
-
 type VisionFileset = Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
 
 const MODEL_URL =
@@ -29,7 +24,7 @@ const ENABLE_PERSON_GATE =
   import.meta.env.VITE_ENABLE_PERSON_GATE !== "false";
 
 const ALLOW_PARTIAL_POSE_FALLBACK =
-  import.meta.env.VITE_ALLOW_PARTIAL_POSE_FALLBACK === "true";
+  import.meta.env.VITE_ALLOW_PARTIAL_POSE_FALLBACK !== "false";
 
 const PERSON_DETECT_EVERY_MS = Number(
   import.meta.env.VITE_PERSON_DETECT_EVERY_MS || 250
@@ -110,7 +105,7 @@ async function createPersonDetector(
   }
 }
 
-export function LocalPoseCoach(_props: Props) {
+export function LocalPoseCoach() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -227,7 +222,11 @@ export function LocalPoseCoach(_props: Props) {
           setPersonStatus("Person gate ready");
         } else {
           setModelStatus("Pose model ready; person gate unavailable");
-          setPersonStatus("Person gate unavailable. Reps will not count unless fallback is enabled.");
+          setPersonStatus(
+            ALLOW_PARTIAL_POSE_FALLBACK
+              ? "Person gate unavailable. Pose-only fallback is active."
+              : "Person gate unavailable. Reps are paused."
+          );
         }
 
         runLoop();

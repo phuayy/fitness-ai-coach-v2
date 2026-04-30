@@ -1,6 +1,6 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { ExerciseType, RepPayload } from "../types";
-import { angleDegrees, avg, avgVisibility, clamp } from "./geometry";
+import { angleDegrees, avgVisibility, clamp } from "./geometry";
 
 type Stage = "idle" | "up" | "down";
 
@@ -31,8 +31,11 @@ export function updateCounter(exercise: ExerciseType, landmarks: NormalizedLandm
 function updateSquat(lm: NormalizedLandmark[], state: CounterState): CounterState {
   const leftKnee = angleDegrees(lm[23], lm[25], lm[27]);
   const rightKnee = angleDegrees(lm[24], lm[26], lm[28]);
-  const kneeAngle = avg([leftKnee, rightKnee]);
-  const visibility = avgVisibility([lm[23], lm[24], lm[25], lm[26], lm[27], lm[28]]);
+  const leftVisibility = avgVisibility([lm[23], lm[25], lm[27]]);
+  const rightVisibility = avgVisibility([lm[24], lm[26], lm[28]]);
+  const useLeft = leftVisibility >= rightVisibility;
+  const kneeAngle = useLeft ? leftKnee : rightKnee;
+  const visibility = Math.max(leftVisibility, rightVisibility);
   const depthOk = kneeAngle < 105;
   const standing = kneeAngle > 160;
   const confidence = clamp(visibility);
@@ -53,15 +56,19 @@ function updateSquat(lm: NormalizedLandmark[], state: CounterState): CounterStat
 
   if (stage === "down" && standing) {
     reps += 1;
-    const isValid = depthOk || kneeAngle < 170;
+    const isValid = true;
     if (isValid) validReps += 1;
-    feedback = isValid ? `Rep ${reps}: counted.` : `Rep ${reps}: try going deeper next time.`;
+    feedback = `Rep ${reps}: counted.`;
     payload = {
       rep_index: reps,
       is_valid: isValid,
       confidence,
       feedback,
-      metrics: { knee_angle: Math.round(kneeAngle), exercise: "squat" }
+      metrics: {
+        knee_angle: Math.round(kneeAngle),
+        side: useLeft ? "left" : "right",
+        exercise: "squat"
+      }
     };
     stage = "up";
   } else if (stage !== "down") {
