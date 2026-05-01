@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_PERSON_MODEL_URL?: string;
   readonly VITE_POSE_DETECT_EVERY_MS?: string;
   readonly VITE_POSE_MODEL_URL?: string;
+  readonly VITE_SUPABASE_ANON_KEY?: string;
+  readonly VITE_SUPABASE_URL?: string;
 }
 
 interface ImportMeta {

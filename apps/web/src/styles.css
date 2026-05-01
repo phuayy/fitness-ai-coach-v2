@@ -112,6 +112,9 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
 .history-list { display: grid; gap: 0.7rem; }
 .history-card { display: grid; gap: 0.25rem; grid-template-columns: 1fr 1.3fr 1fr; padding: 0.85rem; border-radius: 1rem; background: rgba(2, 6, 23, 0.45); border: 1px solid rgba(148, 163, 184, 0.15); }
 .history-card span { color: #cbd5e1; }
+.session-history-card { grid-template-columns: minmax(0, 1.4fr) auto auto; }
+.session-history-card > div:first-child { display: grid; gap: 0.2rem; }
+.history-set-list { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
 
 @media (max-width: 920px) {
   .hero, .coach-grid, .lower-grid { grid-template-columns: 1fr; display: grid; }
@@ -152,6 +155,54 @@ button.danger {
 .small-button {
   padding: 0.45rem 0.75rem;
   font-size: 0.85rem;
+}
+
+.table-action-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.status-badge,
+.rep-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-badge.ready,
+.status-badge.synced,
+.rep-status.valid {
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.status-badge.processing,
+.status-badge.recording,
+.status-badge.syncing {
+  background: rgba(14, 165, 233, 0.16);
+  color: #bae6fd;
+  border: 1px solid rgba(14, 165, 233, 0.35);
+}
+
+.status-badge.failed,
+.rep-status.invalid {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.status-badge.local {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.28);
 }
 
 .set-table-panel {
@@ -215,6 +266,127 @@ button.danger {
   background: rgba(148, 163, 184, 0.08);
 }
 
+.clickable-row {
+  cursor: pointer;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.76);
+  backdrop-filter: blur(12px);
+}
+
+.set-review-modal {
+  width: min(1080px, 100%);
+  max-height: min(760px, calc(100dvh - 2rem));
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 1.25rem;
+  background: #0f172a;
+  box-shadow: 0 32px 100px rgba(0, 0, 0, 0.48);
+  padding: 1rem;
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.review-video-panel,
+.rep-review-panel {
+  min-width: 0;
+}
+
+.review-video {
+  width: 100%;
+  max-height: 58dvh;
+  border-radius: 0.9rem;
+  background: #020617;
+}
+
+.review-video-placeholder {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+  align-content: center;
+  gap: 0.75rem;
+  border: 1px dashed rgba(148, 163, 184, 0.36);
+  border-radius: 0.9rem;
+  background: rgba(2, 6, 23, 0.58);
+  color: #cbd5e1;
+  text-align: center;
+  padding: 1rem;
+}
+
+.review-video-placeholder p {
+  max-width: 420px;
+  margin: 0;
+  color: #94a3b8;
+}
+
+.loading-ring {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 3px solid rgba(125, 211, 252, 0.18);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}
+
+.review-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  color: #94a3b8;
+}
+
+.review-summary strong {
+  color: #e5e7eb;
+}
+
+.compact-scroll {
+  max-height: 430px;
+}
+
+.rep-review-table {
+  min-width: 620px;
+}
+
+.timestamp-button {
+  border-radius: 0.65rem;
+  padding: 0.35rem 0.55rem;
+  color: #bae6fd;
+  background: rgba(14, 165, 233, 0.14);
+  border: 1px solid rgba(14, 165, 233, 0.28);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 720px) {
   .table-header {
     display: grid;
@@ -222,5 +394,18 @@ button.danger {
 
   .table-totals {
     text-align: left;
+  }
+
+  .modal-header,
+  .review-summary {
+    display: grid;
+  }
+
+  .review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-video-placeholder {
+    min-height: 240px;
   }
 }

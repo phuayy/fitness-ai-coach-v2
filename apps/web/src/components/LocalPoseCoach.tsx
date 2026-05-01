@@ -17,7 +17,24 @@ import {
   DEFAULT_CAMERA_FRAME,
   useAdaptiveVideoLayout
 } from "../lib/useAdaptiveVideoLayout";
-import type { CoachFrameState, ExerciseType, SetRecord } from "../types";
+import {
+  createWorkoutSession,
+  finishWorkoutSession,
+  saveWorkoutSet
+} from "../services/workoutHistory";
+import type {
+  CoachFrameState,
+  ExerciseType,
+  RepPayload,
+  RepTimestampRecord,
+  SetRecord,
+  SetVideoStatus
+} from "../types";
+
+interface Props {
+  userId: string | null;
+  onHistoryChanged?: () => void;
+}
 
 type VisionFileset = Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
 type MediaPipeDelegate = "CPU" | "GPU";
@@ -30,6 +47,20 @@ type LandmarkerInitResult = {
 type DetectorInitResult = {
   detector: ObjectDetector;
   delegate: MediaPipeDelegate;
+};
+
+type ActiveSetRecording = {
+  id: string;
+  setNumber: number;
+  startedAt: Date;
+  startedAtMs: number;
+  chunks: Blob[];
+  repEvents: RepTimestampRecord[];
+  videoStatus: SetVideoStatus;
+  recorder?: MediaRecorder;
+  mimeType?: string;
+  rowId?: string;
+  error?: string;
 };
 
 const LOCAL_WASM_FILESET = {
@@ -65,6 +96,28 @@ const WASM_URL = import.meta.env.VITE_MEDIAPIPE_WASM_URL?.trim();
 
 function exerciseLabel(value: ExerciseType): string {
   return value === "pushup" ? "Push-up" : "Squat";
+}
+
+function formatRepTimestamp(seconds: number): string {
+  const safeSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const wholeSeconds = Math.floor(safeSeconds % 60);
+  const tenths = Math.floor((safeSeconds % 1) * 10);
+
+  return `${minutes}:${String(wholeSeconds).padStart(2, "0")}.${tenths}`;
+}
+
+function getSupportedRecordingMimeType(): string | undefined {
+  if (typeof MediaRecorder === "undefined") return undefined;
+
+  const candidates = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+    "video/mp4"
+  ];
+
+  return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
 function delegateFallbacks(): MediaPipeDelegate[] {
@@ -145,7 +198,7 @@ async function createPersonDetector(
   return null;
 }
 
-export function LocalPoseCoach() {
+export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
   const videoCardRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -158,6 +211,11 @@ export function LocalPoseCoach() {
 
   const animationRef = useRef<number | null>(null);
   const counterRef = useRef(createCounterState());
+  const cloudSessionIdRef = useRef<string | null>(null);
+  const sessionStartedAtRef = useRef<Date | null>(null);
+  const recordingRef = useRef<ActiveSetRecording | null>(null);
+  const playbackVideoRef = useRef<HTMLVideoElement | null>(null);
+  const pendingSeekSecondsRef = useRef<number | null>(null);
   const lastVideoTimeRef = useRef(-1);
   const lastPoseDetectTsRef = useRef(0);
 
@@ -186,14 +244,17 @@ export function LocalPoseCoach() {
       : "Pose-only human gate waiting for pose model..."
   );
   const [sessionStatus, setSessionStatus] = useState(
-    "Click Start session to begin temporary local set tracking."
+    "Log in to start saving workout history."
   );
+  const [cloudStatus, setCloudStatus] = useState("Cloud history waiting for login.");
 
   const [sessionActive, setSessionActive] = useState(false);
   const [setActive, setSetActive] = useState(false);
   const [setRows, setSetRows] = useState<SetRecord[]>([]);
   const [nextSetNumber, setNextSetNumber] = useState(1);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
 
   const [coachState, setCoachState] = useState<CoachFrameState>({
     reps: 0,
@@ -210,6 +271,10 @@ export function LocalPoseCoach() {
     cameraStatus === "Camera running locally"
       ? `${cameraStatus} (${cameraFrame.width} x ${cameraFrame.height}, ${cameraFrame.orientation})`
       : cameraStatus;
+  const selectedSet = useMemo(() => {
+    if (!selectedSetId) return setRows[0] ?? null;
+    return setRows.find((row) => row.id === selectedSetId) ?? setRows[0] ?? null;
+  }, [selectedSetId, setRows]);
 
   const tableTotals = useMemo(() => {
     return setRows.reduce(
@@ -331,6 +396,15 @@ export function LocalPoseCoach() {
         cancelAnimationFrame(animationRef.current);
       }
 
+      const activeRecording = recordingRef.current;
+      recordingRef.current = null;
+
+      if (activeRecording?.recorder?.state === "recording") {
+        activeRecording.recorder.stop();
+      }
+
+      revokeSetVideos(setRowsRef.current);
+
       const stream = videoRef.current?.srcObject as MediaStream | null;
       stream?.getTracks().forEach((track) => track.stop());
 
@@ -358,6 +432,21 @@ export function LocalPoseCoach() {
   useEffect(() => {
     voiceEnabledRef.current = voiceEnabled;
   }, [voiceEnabled]);
+
+  useEffect(() => {
+    if (userId) {
+      setCloudStatus("Cloud history ready.");
+      if (!sessionActiveRef.current) {
+        setSessionStatus("Click Start session to save workout history.");
+      }
+    } else {
+      cloudSessionIdRef.current = null;
+      setCloudStatus("Log in to save and restore workout history.");
+      if (!sessionActiveRef.current) {
+        setSessionStatus("Log in to start saving workout history.");
+      }
+    }
+  }, [userId]);
 
   function speakValidCount(count: number) {
     if (!voiceEnabledRef.current) return;
@@ -395,6 +484,262 @@ export function LocalPoseCoach() {
     if (!video) return;
 
     syncCameraFrame(video.videoWidth, video.videoHeight);
+  }
+
+  function replaceSetRows(nextRows: SetRecord[]) {
+    setRowsRef.current = nextRows;
+    setSetRows(nextRows);
+  }
+
+  function updateSetRow(
+    rowId: string,
+    updater: (row: SetRecord) => SetRecord
+  ): boolean {
+    let found = false;
+    const nextRows = setRowsRef.current.map((row) => {
+      if (row.id !== rowId) return row;
+      found = true;
+      return updater(row);
+    });
+
+    if (found) {
+      replaceSetRows(nextRows);
+    }
+
+    return found;
+  }
+
+  function revokeSetVideo(row: SetRecord) {
+    if (row.videoUrl) {
+      URL.revokeObjectURL(row.videoUrl);
+    }
+  }
+
+  function revokeSetVideos(rows: SetRecord[]) {
+    rows.forEach(revokeSetVideo);
+  }
+
+  function finishRecordingBlob(recording: ActiveSetRecording) {
+    if (!recording.rowId) return;
+
+    if (!recording.chunks.length) {
+      updateSetRow(recording.rowId, (row) => ({
+        ...row,
+        videoStatus: "failed",
+        videoError: recording.error ?? "Recording finished without video data."
+      }));
+      return;
+    }
+
+    const blob = new Blob(recording.chunks, {
+      type: recording.mimeType ?? "video/webm"
+    });
+    const videoUrl = URL.createObjectURL(blob);
+    const updated = updateSetRow(recording.rowId, (row) => {
+      if (row.videoUrl) URL.revokeObjectURL(row.videoUrl);
+
+      return {
+        ...row,
+        videoStatus: "ready",
+        videoUrl,
+        videoMimeType: blob.type || recording.mimeType,
+        videoError: undefined
+      };
+    });
+
+    if (!updated) {
+      URL.revokeObjectURL(videoUrl);
+    }
+  }
+
+  function startSetRecording(setNumber: number): ActiveSetRecording {
+    const recording: ActiveSetRecording = {
+      id: `${Date.now()}-${setNumber}`,
+      setNumber,
+      startedAt: new Date(),
+      startedAtMs: performance.now(),
+      chunks: [],
+      repEvents: [],
+      videoStatus: "recording"
+    };
+
+    if (typeof MediaRecorder === "undefined") {
+      recording.videoStatus = "failed";
+      recording.error = "This browser does not support local video recording.";
+      recordingRef.current = recording;
+      return recording;
+    }
+
+    const stream = videoRef.current?.srcObject as MediaStream | null;
+
+    if (!stream) {
+      recording.videoStatus = "failed";
+      recording.error = "Camera stream was not available for recording.";
+      recordingRef.current = recording;
+      return recording;
+    }
+
+    try {
+      const mimeType = getSupportedRecordingMimeType();
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined
+      );
+
+      recording.mimeType = mimeType;
+      recording.recorder = recorder;
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          recording.chunks.push(event.data);
+        }
+      });
+
+      recorder.addEventListener("stop", () => {
+        finishRecordingBlob(recording);
+      });
+
+      recorder.addEventListener("error", () => {
+        recording.videoStatus = "failed";
+        recording.error = "Recording failed while capturing this set.";
+
+        if (recording.rowId) {
+          updateSetRow(recording.rowId, (row) => ({
+            ...row,
+            videoStatus: "failed",
+            videoError: recording.error
+          }));
+        }
+      });
+
+      recorder.start(1000);
+    } catch (error) {
+      recording.videoStatus = "failed";
+      recording.error =
+        error instanceof Error ? error.message : "Could not start recording.";
+    }
+
+    recordingRef.current = recording;
+    return recording;
+  }
+
+  function captureRepTimestamp(payload: RepPayload, now: number) {
+    const recording = recordingRef.current;
+    if (!recording) return;
+
+    const timestampSeconds = Math.max(0, (now - recording.startedAtMs) / 1000);
+
+    recording.repEvents.push({
+      id: `${recording.id}-rep-${payload.rep_index}`,
+      repIndex: payload.rep_index,
+      isValid: payload.is_valid,
+      timestampSeconds,
+      timestampLabel: formatRepTimestamp(timestampSeconds),
+      confidence: payload.confidence,
+      feedback: payload.feedback,
+      metrics: payload.metrics
+    });
+  }
+
+  function currentSessionDurationSeconds(endedAt = new Date()): number {
+    if (!sessionStartedAtRef.current) return 0;
+    return Math.max(
+      0,
+      (endedAt.getTime() - sessionStartedAtRef.current.getTime()) / 1000
+    );
+  }
+
+  async function persistCompletedSet(row: SetRecord) {
+    if (!cloudSessionIdRef.current) return;
+
+    const totals = setRowsRef.current.reduce(
+      (total, item) => ({
+        totalReps: total.totalReps + item.totalReps,
+        validReps: total.validReps + item.validActions
+      }),
+      { totalReps: 0, validReps: 0 }
+    );
+
+    updateSetRow(row.id, (item) => ({
+      ...item,
+      syncStatus: "syncing",
+      syncError: undefined
+    }));
+    setCloudStatus(`Saving set ${row.setNumber}...`);
+
+    try {
+      const saved = await saveWorkoutSet({
+        sessionId: cloudSessionIdRef.current,
+        setNumber: row.setNumber,
+        action: row.action,
+        startedAt: row.recordingStartedAt,
+        endedAt: row.recordingEndedAt ?? new Date().toISOString(),
+        durationSeconds: row.durationSeconds,
+        totalReps: row.totalReps,
+        validReps: row.validActions,
+        repEvents: row.repEvents,
+        sessionTotalReps: totals.totalReps,
+        sessionValidReps: totals.validReps,
+        sessionDurationSeconds: currentSessionDurationSeconds()
+      });
+
+      updateSetRow(row.id, (item) => ({
+        ...item,
+        cloudId: saved.setId,
+        cloudSessionId: cloudSessionIdRef.current ?? undefined,
+        syncStatus: "synced",
+        syncError: undefined
+      }));
+      setCloudStatus(`Set ${row.setNumber} saved to cloud history.`);
+      onHistoryChanged?.();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save set.";
+      updateSetRow(row.id, (item) => ({
+        ...item,
+        syncStatus: "failed",
+        syncError: message
+      }));
+      setCloudStatus(`Set ${row.setNumber} sync failed.`);
+    }
+  }
+
+  async function retrySetSync(row: SetRecord) {
+    if (row.syncStatus === "syncing") return;
+    await persistCompletedSet(row);
+  }
+
+  function stopSetRecording(rowId: string) {
+    const recording = recordingRef.current;
+    recordingRef.current = null;
+
+    if (!recording) return;
+
+    recording.rowId = rowId;
+
+    if (!recording.recorder || recording.videoStatus === "failed") {
+      updateSetRow(rowId, (row) => ({
+        ...row,
+        videoStatus: "failed",
+        videoError: recording.error ?? "Recording was not available."
+      }));
+      return;
+    }
+
+    if (recording.recorder.state === "inactive") {
+      finishRecordingBlob(recording);
+      return;
+    }
+
+    try {
+      recording.recorder.stop();
+    } catch (error) {
+      updateSetRow(rowId, (row) => ({
+        ...row,
+        videoStatus: "failed",
+        videoError:
+          error instanceof Error ? error.message : "Could not stop recording."
+      }));
+    }
   }
 
   function resetLiveCounter(feedback: string) {
@@ -506,6 +851,7 @@ export function LocalPoseCoach() {
       }
 
       if (shouldDrawAndCount && setActiveRef.current) {
+        const previousReps = counterRef.current.reps;
         const previousValidReps = counterRef.current.validReps;
 
         counterRef.current = updateCounter(
@@ -513,6 +859,13 @@ export function LocalPoseCoach() {
           landmarks,
           counterRef.current
         );
+
+        if (
+          counterRef.current.reps > previousReps &&
+          counterRef.current.lastPayload
+        ) {
+          captureRepTimestamp(counterRef.current.lastPayload, now);
+        }
 
         if (counterRef.current.validReps > previousValidReps) {
           speakValidCount(counterRef.current.validReps);
@@ -560,9 +913,38 @@ export function LocalPoseCoach() {
     animationRef.current = requestAnimationFrame(runLoop);
   }
 
-  function startLocalSession() {
-    setRowsRef.current = [];
-    setSetRows([]);
+  async function startLocalSession() {
+    if (!userId) {
+      setSessionStatus("Log in before starting a saved workout session.");
+      setCloudStatus("Login required.");
+      return;
+    }
+
+    const startedAt = new Date();
+    setCloudStatus("Creating cloud session...");
+
+    try {
+      const cloudSession = await createWorkoutSession({
+        userId,
+        exerciseType: exerciseRef.current,
+        startedAt: startedAt.toISOString()
+      });
+      cloudSessionIdRef.current = cloudSession.id;
+      sessionStartedAtRef.current = startedAt;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not create cloud session.";
+      cloudSessionIdRef.current = null;
+      sessionStartedAtRef.current = null;
+      setCloudStatus(message);
+      setSessionStatus("Cloud session could not be started. Try again.");
+      return;
+    }
+
+    revokeSetVideos(setRowsRef.current);
+    replaceSetRows([]);
+    setSelectedSetId(null);
+    setReviewOpen(false);
 
     nextSetNumberRef.current = 1;
     setNextSetNumber(1);
@@ -574,7 +956,8 @@ export function LocalPoseCoach() {
     setSetActive(false);
 
     resetLiveCounter("Session started. Click Start Set for set 1.");
-    setSessionStatus("Temporary local session started. Data will reset on browser refresh.");
+    setSessionStatus("Saved session started. Click Start Set for set 1.");
+    setCloudStatus("Cloud session active.");
   }
 
   function startSet() {
@@ -586,6 +969,7 @@ export function LocalPoseCoach() {
     if (setActiveRef.current) return;
 
     counterRef.current = createCounterState();
+    startSetRecording(nextSetNumberRef.current);
 
     setActiveRef.current = true;
     setSetActive(true);
@@ -607,20 +991,46 @@ export function LocalPoseCoach() {
     if (!setActiveRef.current) return null;
 
     const counter = counterRef.current;
+    const recording = recordingRef.current;
+    const completedAt = new Date();
+    const rowId = recording?.id ?? `${Date.now()}-${nextSetNumberRef.current}`;
+    const durationSeconds = recording
+      ? Math.max(0, (performance.now() - recording.startedAtMs) / 1000)
+      : 0;
+    const videoStatus: SetVideoStatus =
+      recording?.videoStatus === "recording" && recording.recorder
+        ? "processing"
+        : recording?.videoStatus ?? "failed";
 
     const row: SetRecord = {
-      id: `${Date.now()}-${nextSetNumberRef.current}`,
+      id: rowId,
+      cloudSessionId: cloudSessionIdRef.current ?? undefined,
+      syncStatus: cloudSessionIdRef.current ? "syncing" : "failed",
+      syncError: cloudSessionIdRef.current
+        ? undefined
+        : "Cloud session is not available.",
       action: exerciseRef.current,
       setNumber: nextSetNumberRef.current,
       validActions: counter.validReps,
       totalReps: counter.reps,
-      completedAt: new Date().toLocaleTimeString()
+      completedAt: completedAt.toLocaleTimeString(),
+      recordingStartedAt: recording?.startedAt.toISOString() ?? completedAt.toISOString(),
+      recordingEndedAt: completedAt.toISOString(),
+      durationSeconds,
+      repEvents: [...(recording?.repEvents ?? [])],
+      videoStatus,
+      videoMimeType: recording?.mimeType,
+      videoError:
+        videoStatus === "failed"
+          ? recording?.error ?? "Recording was not available."
+          : undefined
     };
 
     const nextRows = [...setRowsRef.current, row];
 
-    setRowsRef.current = nextRows;
-    setSetRows(nextRows);
+    replaceSetRows(nextRows);
+    stopSetRecording(row.id);
+    void persistCompletedSet(row);
 
     nextSetNumberRef.current += 1;
     setNextSetNumber(nextSetNumberRef.current);
@@ -632,8 +1042,8 @@ export function LocalPoseCoach() {
 
     setSessionStatus(
       reason === "auto"
-        ? `Set ${row.setNumber} auto-saved during Finish Session: ${row.validActions}/${row.totalReps} valid.`
-        : `Set ${row.setNumber} saved: ${row.validActions}/${row.totalReps} valid.`
+        ? `Set ${row.setNumber} auto-saved during Finish Session: ${row.validActions}/${row.totalReps} valid. Recording is ${row.videoStatus}.`
+        : `Set ${row.setNumber} saved: ${row.validActions}/${row.totalReps} valid. Recording is ${row.videoStatus}.`
     );
 
     return row;
@@ -647,7 +1057,7 @@ export function LocalPoseCoach() {
     }
   }
 
-  function finishLocalSession() {
+  async function finishLocalSession() {
     if (!sessionActiveRef.current) {
       setSessionStatus("No active session to finish.");
       return;
@@ -658,6 +1068,7 @@ export function LocalPoseCoach() {
     }
 
     const rows = setRowsRef.current;
+    const endedAt = new Date();
 
     const totals = rows.reduce(
       (total, row) => ({
@@ -666,6 +1077,28 @@ export function LocalPoseCoach() {
       }),
       { validActions: 0, totalReps: 0 }
     );
+
+    if (cloudSessionIdRef.current) {
+      setCloudStatus("Finishing cloud session...");
+
+      try {
+        await finishWorkoutSession({
+          sessionId: cloudSessionIdRef.current,
+          endedAt: endedAt.toISOString(),
+          totalReps: totals.totalReps,
+          validReps: totals.validActions,
+          durationSeconds: currentSessionDurationSeconds(endedAt)
+        });
+        setCloudStatus("Cloud session finished.");
+        onHistoryChanged?.();
+      } catch (error) {
+        setCloudStatus(
+          error instanceof Error
+            ? error.message
+            : "Could not finish cloud session."
+        );
+      }
+    }
 
     sessionActiveRef.current = false;
     setSessionActive(false);
@@ -678,6 +1111,8 @@ export function LocalPoseCoach() {
     }
 
     resetLiveCounter("Session finalized. Review or delete rows in the table below.");
+    cloudSessionIdRef.current = null;
+    sessionStartedAtRef.current = null;
 
     setSessionStatus(
       rows.length
@@ -687,12 +1122,48 @@ export function LocalPoseCoach() {
   }
 
   function deleteSet(id: string) {
+    const deletedRow = setRowsRef.current.find((row) => row.id === id);
+    if (deletedRow) revokeSetVideo(deletedRow);
+
     const nextRows = setRowsRef.current.filter((row) => row.id !== id);
 
-    setRowsRef.current = nextRows;
-    setSetRows(nextRows);
+    replaceSetRows(nextRows);
+    if (selectedSetId === id) {
+      setSelectedSetId(nextRows[0]?.id ?? null);
+      setReviewOpen(Boolean(nextRows.length));
+    }
 
     setSessionStatus("Set row deleted from temporary session table.");
+  }
+
+  function openSetReview(id: string) {
+    setSelectedSetId(id);
+    setReviewOpen(true);
+  }
+
+  function closeSetReview() {
+    setReviewOpen(false);
+  }
+
+  function seekPlaybackTo(seconds: number) {
+    pendingSeekSecondsRef.current = seconds;
+
+    const video = playbackVideoRef.current;
+    if (!video || !selectedSet?.videoUrl) return;
+
+    video.currentTime = seconds;
+    video.play().catch(() => undefined);
+  }
+
+  function handlePlaybackMetadata() {
+    const pendingSeekSeconds = pendingSeekSecondsRef.current;
+    const video = playbackVideoRef.current;
+    if (pendingSeekSeconds === null) return;
+
+    pendingSeekSecondsRef.current = null;
+    if (video) {
+      video.currentTime = pendingSeekSeconds;
+    }
   }
 
   return (
@@ -771,7 +1242,7 @@ export function LocalPoseCoach() {
           </div>
 
           <div className="button-row">
-            <button onClick={startLocalSession} disabled={sessionActive}>
+            <button onClick={startLocalSession} disabled={sessionActive || !userId}>
               Start session
             </button>
 
@@ -810,6 +1281,10 @@ export function LocalPoseCoach() {
               <dd>{coachState.backendStatus}</dd>
             </div>
             <div>
+              <dt>Cloud</dt>
+              <dd>{cloudStatus}</dd>
+            </div>
+            <div>
               <dt>Session</dt>
               <dd>{sessionStatus}</dd>
             </div>
@@ -846,6 +1321,8 @@ export function LocalPoseCoach() {
                   <th>Set Number</th>
                   <th>Valid Action</th>
                   <th>Total Reps</th>
+                  <th>Recording</th>
+                  <th>Cloud</th>
                   <th>Completed</th>
                   <th>Actions</th>
                 </tr>
@@ -853,19 +1330,58 @@ export function LocalPoseCoach() {
 
               <tbody>
                 {setRows.map((row) => (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className="clickable-row"
+                    onClick={() => openSetReview(row.id)}
+                  >
                     <td>{exerciseLabel(row.action)}</td>
                     <td>{row.setNumber}</td>
                     <td>{row.validActions}</td>
                     <td>{row.totalReps}</td>
+                    <td>
+                      <span className={`status-badge ${row.videoStatus}`}>
+                        {row.videoStatus}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`status-badge ${row.syncStatus}`}>
+                        {row.syncStatus}
+                      </span>
+                    </td>
                     <td>{row.completedAt}</td>
                     <td>
-                      <button
-                        className="danger small-button"
-                        onClick={() => deleteSet(row.id)}
-                      >
-                        Delete
-                      </button>
+                      <div className="table-action-row">
+                        {row.syncStatus === "failed" && (
+                          <button
+                            className="secondary small-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void retrySetSync(row);
+                            }}
+                          >
+                            Retry sync
+                          </button>
+                        )}
+                        <button
+                          className="secondary small-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openSetReview(row.id);
+                          }}
+                        >
+                          Review
+                        </button>
+                        <button
+                          className="danger small-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deleteSet(row.id);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -874,6 +1390,135 @@ export function LocalPoseCoach() {
           </div>
         )}
       </section>
+
+      {reviewOpen && selectedSet && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="set-review-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="set-review-title"
+          >
+            <header className="modal-header">
+              <div>
+                <p className="eyebrow">Set review</p>
+                <h2 id="set-review-title">Recording & Rep Timeline</h2>
+              </div>
+
+              <button className="secondary small-button" onClick={closeSetReview}>
+                Close
+              </button>
+            </header>
+
+            <label>
+              Set
+              <select
+                value={selectedSet.id}
+                onChange={(event) => {
+                  pendingSeekSecondsRef.current = null;
+                  setSelectedSetId(event.target.value);
+                }}
+              >
+                {setRows.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    Set {row.setNumber} - {exerciseLabel(row.action)} -{" "}
+                    {row.validActions}/{row.totalReps} valid
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="review-grid">
+              <div className="review-video-panel">
+                {selectedSet.videoStatus === "ready" && selectedSet.videoUrl ? (
+                  <video
+                    key={selectedSet.videoUrl}
+                    ref={playbackVideoRef}
+                    className="review-video"
+                    src={selectedSet.videoUrl}
+                    controls
+                    playsInline
+                    onLoadedMetadata={handlePlaybackMetadata}
+                  />
+                ) : (
+                  <div className="review-video-placeholder">
+                    {selectedSet.videoStatus === "processing" ||
+                    selectedSet.videoStatus === "recording" ? (
+                      <span className="loading-ring" aria-hidden="true" />
+                    ) : null}
+                    <strong>
+                      {selectedSet.videoStatus === "failed"
+                        ? "Recording unavailable"
+                        : "Video processing in progress"}
+                    </strong>
+                    <p>
+                      {selectedSet.videoStatus === "failed"
+                        ? selectedSet.videoError ?? "This set does not have playable video."
+                        : "In progress. Keep this session open while the browser prepares playback."}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="rep-review-panel">
+                <div className="review-summary">
+                  <span>
+                    Duration: {formatRepTimestamp(selectedSet.durationSeconds)}
+                  </span>
+                  <strong>
+                    {selectedSet.validActions}/{selectedSet.totalReps} valid
+                  </strong>
+                </div>
+
+                {selectedSet.repEvents.length === 0 ? (
+                  <p className="hint">
+                    No completed reps were captured for this set.
+                  </p>
+                ) : (
+                  <div className="table-scroll compact-scroll">
+                    <table className="set-table rep-review-table">
+                      <thead>
+                        <tr>
+                          <th>Rep</th>
+                          <th>Status</th>
+                          <th>Timestamp</th>
+                          <th>Feedback</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {selectedSet.repEvents.map((rep) => (
+                          <tr key={rep.id}>
+                            <td>{rep.repIndex}</td>
+                            <td>
+                              <span
+                                className={`rep-status ${
+                                  rep.isValid ? "valid" : "invalid"
+                                }`}
+                              >
+                                {rep.isValid ? "Valid" : "Invalid"}
+                              </span>
+                            </td>
+                            <td>
+                              <button
+                                className="timestamp-button"
+                                onClick={() => seekPlaybackTo(rep.timestampSeconds)}
+                              >
+                                {rep.timestampLabel}
+                              </button>
+                            </td>
+                            <td>{rep.feedback}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 }

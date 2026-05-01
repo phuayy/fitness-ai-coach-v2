@@ -22,9 +22,24 @@ export interface WorkoutSession {
   notes: string | null;
 }
 
+export type CloudSyncStatus = "local" | "syncing" | "synced" | "failed";
+
 export interface RepPayload {
   rep_index: number;
   is_valid: boolean;
+  confidence: number;
+  feedback: string;
+  metrics: Record<string, unknown>;
+}
+
+export type SetVideoStatus = "recording" | "processing" | "ready" | "failed";
+
+export interface RepTimestampRecord {
+  id: string;
+  repIndex: number;
+  isValid: boolean;
+  timestampSeconds: number;
+  timestampLabel: string;
   confidence: number;
   feedback: string;
   metrics: Record<string, unknown>;
@@ -42,9 +57,55 @@ export interface CoachFrameState {
 
 export interface SetRecord {
   id: string;
+  cloudId?: string;
+  cloudSessionId?: string;
+  syncStatus: CloudSyncStatus;
+  syncError?: string;
   action: ExerciseType;
   setNumber: number;
   validActions: number;
   totalReps: number;
   completedAt: string;
+  recordingStartedAt: string;
+  recordingEndedAt: string | null;
+  durationSeconds: number;
+  repEvents: RepTimestampRecord[];
+  videoStatus: SetVideoStatus;
+  videoUrl?: string;
+  videoMimeType?: string;
+  videoError?: string;
+}
+
+export interface CloudRepEvent {
+  id: string;
+  repIndex: number;
+  isValid: boolean;
+  timestampSeconds: number;
+  confidence: number;
+  feedback: string;
+  metrics: Record<string, unknown>;
+}
+
+export interface CloudWorkoutSet {
+  id: string;
+  setNumber: number;
+  action: ExerciseType;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  totalReps: number;
+  validReps: number;
+  reps: CloudRepEvent[];
+}
+
+export interface CloudWorkoutSession {
+  id: string;
+  exerciseType: ExerciseType;
+  startedAt: string;
+  endedAt: string | null;
+  status: "active" | "finished";
+  totalReps: number;
+  validReps: number;
+  durationSeconds: number | null;
+  sets: CloudWorkoutSet[];
 }
