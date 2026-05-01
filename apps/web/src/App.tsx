@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AuthPanel } from "./components/AuthPanel";
+import { Dashboard } from "./components/Dashboard";
 import { LocalPoseCoach } from "./components/LocalPoseCoach";
 import { SessionHistory } from "./components/SessionHistory";
 import {
@@ -154,15 +155,20 @@ export default function App() {
     );
   }
 
+  const isWorkoutRoute = routePath === "/workout";
+
   return (
     <main>
       <header className="hero">
         <div>
-          <p className="eyebrow">Cloud history mode</p>
-          <h1>Fitness AI Local Pose Coach</h1>
+          <p className="eyebrow">
+            {isWorkoutRoute ? "Workout session" : "Dashboard"}
+          </p>
+          <h1>{isWorkoutRoute ? "Local Pose Coach" : "Fitness AI Dashboard"}</h1>
           <p>
-            Camera frames stay on-device. Rep, set, and session metadata syncs
-            to your account so workout history survives refreshes.
+            {isWorkoutRoute
+              ? "Camera frames stay on-device while session, set, and rep metadata syncs to your account."
+              : "Start a workout, review your training calendar, and keep progress tied to your account."}
           </p>
         </div>
         <div className="hero-actions">
@@ -170,20 +176,34 @@ export default function App() {
             <span>{authStatus}</span>
             <strong>{session.user.email ?? "Google account"}</strong>
           </div>
+          {isWorkoutRoute && (
+            <button className="secondary" onClick={() => navigate("/")}>
+              Dashboard
+            </button>
+          )}
           <button className="secondary" onClick={logout} disabled={loggingOut}>
             Log out
           </button>
         </div>
       </header>
 
-      <LocalPoseCoach
-        userId={session?.user.id ?? null}
-        onHistoryChanged={() => setHistoryRefresh((value) => value + 1)}
-      />
+      {isWorkoutRoute ? (
+        <>
+          <LocalPoseCoach
+            userId={session?.user.id ?? null}
+            onHistoryChanged={() => setHistoryRefresh((value) => value + 1)}
+          />
 
-      <div className="lower-grid history-only">
-        <SessionHistory enabled={Boolean(session)} refreshKey={historyRefresh} />
-      </div>
+          <div className="lower-grid history-only">
+            <SessionHistory enabled={Boolean(session)} refreshKey={historyRefresh} />
+          </div>
+        </>
+      ) : (
+        <Dashboard
+          refreshKey={historyRefresh}
+          onStartWorkout={() => navigate("/workout")}
+        />
+      )}
     </main>
   );
 }

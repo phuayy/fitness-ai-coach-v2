@@ -72,6 +72,23 @@ export interface FinishWorkoutSessionInput {
   durationSeconds: number;
 }
 
+export interface DeleteWorkoutSetInput {
+  setId: string;
+  totalReps: number;
+  validReps: number;
+  durationSeconds: number | null;
+}
+
+export interface ListWorkoutHistoryOptions {
+  limit?: number;
+  startedFrom?: string;
+  startedTo?: string;
+}
+
+type StartedAtRow = {
+  started_at: string;
+};
+
 function toCloudRep(row: RepRow): CloudRepEvent {
   return {
     id: row.id,
@@ -216,15 +233,57 @@ export async function finishWorkoutSession(
   if (error) throw error;
 }
 
-export async function listWorkoutHistory(): Promise<CloudWorkoutSession[]> {
+export async function deleteWorkoutSet(
+  input: DeleteWorkoutSetInput
+): Promise<void> {
   const supabase = getSupabaseClient();
-  const { data: sessionRows, error: sessionError } = await supabase
+  const { error } = await supabase.rpc("delete_workout_set_and_update_session", {
+    p_set_id: input.setId,
+    p_total_reps: input.totalReps,
+    p_valid_reps: input.validReps,
+    p_duration_seconds: input.durationSeconds
+  });
+
+  if (error) throw error;
+}
+
+export async function getOldestWorkoutSessionYear(): Promise<number | null> {
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("workout_sessions")
+    .select("started_at")
+    .order("started_at", { ascending: true })
+    .limit(1)
+    .returns<StartedAtRow[]>();
+
+  if (error) throw error;
+  if (!data.length) return null;
+
+  return new Date(data[0].started_at).getFullYear();
+}
+
+export async function listWorkoutHistory(
+  options: ListWorkoutHistoryOptions = {}
+): Promise<CloudWorkoutSession[]> {
+  const supabase = getSupabaseClient();
+  let sessionQuery = supabase
     .from("workout_sessions")
     .select(
       "id, exercise_type, started_at, ended_at, status, total_reps, valid_reps, duration_seconds"
-    )
+    );
+
+  if (options.startedFrom) {
+    sessionQuery = sessionQuery.gte("started_at", options.startedFrom);
+  }
+
+  if (options.startedTo) {
+    sessionQuery = sessionQuery.lt("started_at", options.startedTo);
+  }
+
+  const { data: sessionRows, error: sessionError } = await sessionQuery
     .order("started_at", { ascending: false })
-    .limit(25)
+    .limit(options.limit ?? 25)
     .returns<SessionRow[]>();
 
   if (sessionError) throw sessionError;

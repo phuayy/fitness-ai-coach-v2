@@ -19,6 +19,7 @@ import {
 } from "../lib/useAdaptiveVideoLayout";
 import {
   createWorkoutSession,
+  deleteWorkoutSet,
   finishWorkoutSession,
   saveWorkoutSet
 } from "../services/workoutHistory";
@@ -650,16 +651,20 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
     );
   }
 
+  function calculateSessionTotals(rows: SetRecord[]) {
+    return rows.reduce(
+      (total, row) => ({
+        validActions: total.validActions + row.validActions,
+        totalReps: total.totalReps + row.totalReps
+      }),
+      { validActions: 0, totalReps: 0 }
+    );
+  }
+
   async function persistCompletedSet(row: SetRecord) {
     if (!cloudSessionIdRef.current) return;
 
-    const totals = setRowsRef.current.reduce(
-      (total, item) => ({
-        totalReps: total.totalReps + item.totalReps,
-        validReps: total.validReps + item.validActions
-      }),
-      { totalReps: 0, validReps: 0 }
-    );
+    const totals = calculateSessionTotals(setRowsRef.current);
 
     updateSetRow(row.id, (item) => ({
       ...item,
@@ -680,7 +685,7 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
         validReps: row.validActions,
         repEvents: row.repEvents,
         sessionTotalReps: totals.totalReps,
-        sessionValidReps: totals.validReps,
+        sessionValidReps: totals.validActions,
         sessionDurationSeconds: currentSessionDurationSeconds()
       });
 
@@ -1071,13 +1076,7 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
     const rows = setRowsRef.current;
     const endedAt = new Date();
 
-    const totals = rows.reduce(
-      (total, row) => ({
-        validActions: total.validActions + row.validActions,
-        totalReps: total.totalReps + row.totalReps
-      }),
-      { validActions: 0, totalReps: 0 }
-    );
+    const totals = calculateSessionTotals(rows);
 
     if (cloudSessionIdRef.current) {
       setCloudStatus("Finishing cloud session...");
@@ -1138,19 +1137,65 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
     }
   }
 
-  function deleteSet(id: string) {
+  async function deleteSet(id: string) {
     const deletedRow = setRowsRef.current.find((row) => row.id === id);
-    if (deletedRow) revokeSetVideo(deletedRow);
+    if (!deletedRow) return;
+
+    if (deletedRow.syncStatus === "syncing") {
+      setSessionStatus("Wait for this set to finish syncing before deleting it.");
+      return;
+    }
 
     const nextRows = setRowsRef.current.filter((row) => row.id !== id);
 
+    if (deletedRow.cloudId) {
+      const totals = calculateSessionTotals(nextRows);
+
+      updateSetRow(id, (row) => ({
+        ...row,
+        syncStatus: "syncing",
+        syncError: undefined
+      }));
+      setCloudStatus(`Deleting set ${deletedRow.setNumber} from cloud history...`);
+
+      try {
+        await deleteWorkoutSet({
+          setId: deletedRow.cloudId,
+          totalReps: totals.totalReps,
+          validReps: totals.validActions,
+          durationSeconds: sessionActiveRef.current
+            ? currentSessionDurationSeconds()
+            : null
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Could not delete set.";
+
+        updateSetRow(id, (row) => ({
+          ...row,
+          syncStatus: "failed",
+          syncError: message
+        }));
+        setCloudStatus(`Set ${deletedRow.setNumber} delete failed.`);
+        setSessionStatus(message);
+        return;
+      }
+    }
+
+    revokeSetVideo(deletedRow);
     replaceSetRows(nextRows);
     if (selectedSetId === id) {
       setSelectedSetId(nextRows[0]?.id ?? null);
       setReviewOpen(Boolean(nextRows.length));
     }
 
-    setSessionStatus("Set row deleted from temporary session table.");
+    setCloudStatus(
+      deletedRow.cloudId
+        ? `Set ${deletedRow.setNumber} deleted from cloud history.`
+        : "Unsynced set removed from this session."
+    );
+    setSessionStatus("Set row deleted from Session Table.");
+    onHistoryChanged?.();
   }
 
   function openSetReview(id: string) {
@@ -1315,8 +1360,8 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
       <section className="panel set-table-panel">
         <div className="table-header">
           <div>
-            <p className="eyebrow">Temporary session table</p>
-            <h2>Rep & Set Summary</h2>
+            <p className="eyebrow">Synced workout session</p>
+            <h2>Session Table</h2>
           </div>
 
           <div className="table-totals">
@@ -1394,9 +1439,10 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
                         </button>
                         <button
                           className="danger small-button"
+                          disabled={row.syncStatus === "syncing"}
                           onClick={(event) => {
                             event.stopPropagation();
-                            deleteSet(row.id);
+                            void deleteSet(row.id);
                           }}
                         >
                           Delete
