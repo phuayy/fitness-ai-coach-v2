@@ -282,6 +282,18 @@ button.dashboard-module {
   background: rgba(15, 23, 42, 0.72);
 }
 
+.workout-session-layout {
+  display: grid;
+  gap: 1rem;
+}
+
+.workout-panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
 .coach-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.75fr); gap: 1rem; align-items: stretch; }
 .video-card, .panel { border: 1px solid rgba(148, 163, 184, 0.22); background: rgba(15, 23, 42, 0.72); border-radius: 1.5rem; box-shadow: 0 24px 80px rgba(0,0,0,0.32); }
 .video-card {
@@ -318,6 +330,7 @@ button.dashboard-module {
 .panel h2 { margin: 0 0 1rem; font-size: 1.25rem; }
 .compact-panel { display: flex; align-items: center; justify-content: space-between; }
 .coach-panel { display: flex; flex-direction: column; gap: 1rem; }
+.stats-panel { display: grid; align-content: center; }
 
 label { display: grid; gap: 0.4rem; color: #cbd5e1; font-weight: 700; }
 input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); background: rgba(2, 6, 23, 0.75); color: #e5e7eb; border-radius: 0.9rem; padding: 0.75rem 0.85rem; }
@@ -336,6 +349,13 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
 .status-list div { display: grid; grid-template-columns: 5rem 1fr; gap: 0.7rem; }
 .status-list dt { color: #94a3b8; }
 .status-list dd { margin: 0; color: #e5e7eb; }
+.help-modal { width: min(720px, 100%); }
+.help-status-list div {
+  grid-template-columns: minmax(7.5rem, 0.32fr) minmax(0, 1fr);
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+.help-status-list div:last-child { border-bottom: 0; }
 
 .lower-grid { display: grid; grid-template-columns: minmax(280px, 0.7fr) 1fr; gap: 1rem; margin-top: 1rem; align-items: start; }
 .lower-grid.history-only { grid-template-columns: 1fr; }
@@ -349,7 +369,7 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
 .history-set-list { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
 
 @media (max-width: 920px) {
-  .hero, .coach-grid, .lower-grid, .auth-page, .dashboard-grid { grid-template-columns: 1fr; display: grid; }
+  .hero, .coach-grid, .workout-panel-grid, .lower-grid, .auth-page, .dashboard-grid { grid-template-columns: 1fr; display: grid; }
   .hero { display: grid; }
   .hero-actions { display: grid; }
   .status-pill { white-space: normal; }

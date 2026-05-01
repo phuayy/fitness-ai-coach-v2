@@ -29,12 +29,14 @@ import type {
   RepPayload,
   RepTimestampRecord,
   SetRecord,
-  SetVideoStatus
+  SetVideoStatus,
+  WorkoutHelpStatus
 } from "../types";
 
 interface Props {
   userId: string | null;
   onHistoryChanged?: () => void;
+  onStatusChange?: (status: WorkoutHelpStatus) => void;
 }
 
 type VisionFileset = Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
@@ -199,7 +201,11 @@ async function createPersonDetector(
   return null;
 }
 
-export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
+export function LocalPoseCoach({
+  userId,
+  onHistoryChanged,
+  onStatusChange
+}: Props) {
   const videoCardRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -273,6 +279,25 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
     cameraStatus === "Camera running locally"
       ? `${cameraStatus} (${cameraFrame.width} x ${cameraFrame.height}, ${cameraFrame.orientation})`
       : cameraStatus;
+
+  useEffect(() => {
+    onStatusChange?.({
+      camera: cameraStatusText,
+      model: modelStatus,
+      humanGate: personStatus,
+      mode: coachState.backendStatus,
+      cloud: cloudStatus,
+      session: sessionStatus
+    });
+  }, [
+    cameraStatusText,
+    cloudStatus,
+    coachState.backendStatus,
+    modelStatus,
+    onStatusChange,
+    personStatus,
+    sessionStatus
+  ]);
   const selectedSet = useMemo(() => {
     if (!selectedSetId) return setRows[0] ?? null;
     return setRows.find((row) => row.id === selectedSetId) ?? setRows[0] ?? null;
@@ -1230,7 +1255,7 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
 
   return (
     <>
-      <section className="coach-grid">
+      <section className="workout-session-layout">
         <div
           ref={videoCardRef}
           className="video-card"
@@ -1254,107 +1279,81 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
           </div>
         </div>
 
-        <aside className="panel coach-panel">
-          <p className="eyebrow">Live local coach</p>
-          <h2>Instant overlay, local set tracking</h2>
+        <div className="workout-panel-grid">
+          <section className="panel stats-panel">
+            <div className="metric-grid">
+              <div>
+                <span>Current Reps</span>
+                <strong>{coachState.reps}</strong>
+              </div>
+              <div>
+                <span>Valid Reps</span>
+                <strong>{coachState.validReps}</strong>
+              </div>
+              <div>
+                <span>FPS</span>
+                <strong>{coachState.fps}</strong>
+              </div>
+              <div>
+                <span>Confidence</span>
+                <strong>{Math.round(coachState.confidence * 100)}%</strong>
+              </div>
+            </div>
+          </section>
 
-          <label>
-            Exercise
-            <select
-              value={exercise}
-              disabled={setActive}
-              onChange={(event) => setExercise(event.target.value as ExerciseType)}
-            >
-              <option value="squat">Squat</option>
-              <option value="pushup">Push-up</option>
-            </select>
-          </label>
+          <section className="panel coach-panel">
+            <label>
+              Exercise
+              <select
+                value={exercise}
+                disabled={setActive}
+                onChange={(event) => setExercise(event.target.value as ExerciseType)}
+              >
+                <option value="squat">Squat</option>
+                <option value="pushup">Push-up</option>
+              </select>
+            </label>
 
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={voiceEnabled}
-              onChange={(event) => setVoiceEnabled(event.target.checked)}
-            />
-            Voice count valid actions
-          </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={voiceEnabled}
+                onChange={(event) => setVoiceEnabled(event.target.checked)}
+              />
+              Voice count valid actions
+            </label>
 
-          <div className="metric-grid">
-            <div>
-              <span>Current Reps</span>
-              <strong>{coachState.reps}</strong>
+            <div className="feedback-box">
+              <span>{coachState.stage.toUpperCase()}</span>
+              <strong>{coachState.feedback}</strong>
             </div>
-            <div>
-              <span>Current Valid</span>
-              <strong>{coachState.validReps}</strong>
-            </div>
-            <div>
-              <span>FPS</span>
-              <strong>{coachState.fps}</strong>
-            </div>
-            <div>
-              <span>Confidence</span>
-              <strong>{Math.round(coachState.confidence * 100)}%</strong>
-            </div>
-          </div>
 
-          <div className="feedback-box">
-            <span>{coachState.stage.toUpperCase()}</span>
-            <strong>{coachState.feedback}</strong>
-          </div>
+            <div className="button-row">
+              <button
+                className={sessionActive ? "finish-session" : "start-session"}
+                onClick={toggleSession}
+                disabled={!userId || sessionTransitioning}
+                aria-pressed={sessionActive}
+              >
+                {sessionTransitioning
+                  ? sessionActive
+                    ? "Finishing..."
+                    : "Starting..."
+                  : sessionActive
+                    ? "Finish Session"
+                    : "Start Session"}
+              </button>
 
-          <div className="button-row">
-            <button
-              className={sessionActive ? "finish-session" : "start-session"}
-              onClick={toggleSession}
-              disabled={!userId || sessionTransitioning}
-              aria-pressed={sessionActive}
-            >
-              {sessionTransitioning
-                ? sessionActive
-                  ? "Finishing..."
-                  : "Starting..."
-                : sessionActive
-                  ? "Finish Session"
-                  : "Start Session"}
-            </button>
-
-            <button
-              className={setActive ? "stop-set" : "start-set"}
-              onClick={toggleSet}
-              disabled={!sessionActive || sessionTransitioning}
-            >
-              {setActive ? "Stop Set" : "Start Set"}
-            </button>
-          </div>
-
-          <dl className="status-list">
-            <div>
-              <dt>Camera</dt>
-              <dd>{cameraStatusText}</dd>
+              <button
+                className={setActive ? "stop-set" : "start-set"}
+                onClick={toggleSet}
+                disabled={!sessionActive || sessionTransitioning}
+              >
+                {setActive ? "Stop Set" : "Start Set"}
+              </button>
             </div>
-            <div>
-              <dt>Model</dt>
-              <dd>{modelStatus}</dd>
-            </div>
-            <div>
-              <dt>Human gate</dt>
-              <dd>{personStatus}</dd>
-            </div>
-            <div>
-              <dt>Mode</dt>
-              <dd>{coachState.backendStatus}</dd>
-            </div>
-            <div>
-              <dt>Cloud</dt>
-              <dd>{cloudStatus}</dd>
-            </div>
-            <div>
-              <dt>Session</dt>
-              <dd>{sessionStatus}</dd>
-            </div>
-          </dl>
-        </aside>
+          </section>
+        </div>
       </section>
 
       <section className="panel set-table-panel">

@@ -109,3 +109,12 @@ export interface CloudWorkoutSession {
   durationSeconds: number | null;
   sets: CloudWorkoutSet[];
 }
+
+export interface WorkoutHelpStatus {
+  camera: string;
+  model: string;
+  humanGate: string;
+  mode: string;
+  cloud: string;
+  session: string;
+}

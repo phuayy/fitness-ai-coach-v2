@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AuthPanel } from "./components/AuthPanel";
 import { Dashboard } from "./components/Dashboard";
 import { LocalPoseCoach } from "./components/LocalPoseCoach";
@@ -9,6 +9,16 @@ import {
   supabase
 } from "./lib/supabaseClient";
 import type { SupabaseSession } from "./lib/supabaseClient";
+import type { WorkoutHelpStatus } from "./types";
+
+const DEFAULT_WORKOUT_HELP_STATUS: WorkoutHelpStatus = {
+  camera: "Device in use",
+  model: "Not ready",
+  humanGate: "Device in use",
+  mode: "local only",
+  cloud: "Cloud history ready.",
+  session: "Click Start session to save workout history."
+};
 
 export default function App() {
   const [session, setSession] = useState<SupabaseSession | null>(null);
@@ -16,6 +26,9 @@ export default function App() {
   const [recoveryMode, setRecoveryMode] = useState(routePath === "/reset-password");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [workoutHelpStatus, setWorkoutHelpStatus] =
+    useState<WorkoutHelpStatus>(DEFAULT_WORKOUT_HELP_STATUS);
   const [authStatus, setAuthStatus] = useState(
     isSupabaseConfigured ? "Restoring account..." : "Supabase not configured"
   );
@@ -25,6 +38,19 @@ export default function App() {
     window.history.pushState(null, "", path);
     setRoutePath(window.location.pathname);
   }
+
+  const updateWorkoutHelpStatus = useCallback((status: WorkoutHelpStatus) => {
+    setWorkoutHelpStatus((current) =>
+      current.camera === status.camera &&
+      current.model === status.model &&
+      current.humanGate === status.humanGate &&
+      current.mode === status.mode &&
+      current.cloud === status.cloud &&
+      current.session === status.session
+        ? current
+        : status
+    );
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
@@ -165,11 +191,12 @@ export default function App() {
             {isWorkoutRoute ? "Workout session" : "Dashboard"}
           </p>
           <h1>{isWorkoutRoute ? "Local Pose Coach" : "Fitness AI Dashboard"}</h1>
-          <p>
-            {isWorkoutRoute
-              ? "Camera frames stay on-device while session, set, and rep metadata syncs to your account."
-              : "Start a workout, review your training calendar, and keep progress tied to your account."}
-          </p>
+          {!isWorkoutRoute && (
+            <p>
+              Start a workout, review your training calendar, and keep progress
+              tied to your account.
+            </p>
+          )}
         </div>
         <div className="hero-actions">
           <div className="status-pill">
@@ -177,9 +204,14 @@ export default function App() {
             <strong>{session.user.email ?? "Google account"}</strong>
           </div>
           {isWorkoutRoute && (
-            <button className="secondary" onClick={() => navigate("/")}>
-              Dashboard
-            </button>
+            <>
+              <button className="secondary" onClick={() => navigate("/")}>
+                Dashboard
+              </button>
+              <button className="secondary" onClick={() => setHelpOpen(true)}>
+                Help
+              </button>
+            </>
           )}
           <button className="secondary" onClick={logout} disabled={loggingOut}>
             Log out
@@ -192,6 +224,7 @@ export default function App() {
           <LocalPoseCoach
             userId={session?.user.id ?? null}
             onHistoryChanged={() => setHistoryRefresh((value) => value + 1)}
+            onStatusChange={updateWorkoutHelpStatus}
           />
 
           <div className="lower-grid history-only">
@@ -203,6 +236,57 @@ export default function App() {
           refreshKey={historyRefresh}
           onStartWorkout={() => navigate("/workout")}
         />
+      )}
+
+      {isWorkoutRoute && helpOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="set-review-modal help-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="workout-help-title"
+          >
+            <header className="modal-header">
+              <div>
+                <p className="eyebrow">Workout status</p>
+                <h2 id="workout-help-title">Help</h2>
+              </div>
+              <button
+                className="secondary small-button"
+                onClick={() => setHelpOpen(false)}
+              >
+                Close
+              </button>
+            </header>
+
+            <dl className="status-list help-status-list">
+              <div>
+                <dt>Camera</dt>
+                <dd>{workoutHelpStatus.camera}</dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd>{workoutHelpStatus.model}</dd>
+              </div>
+              <div>
+                <dt>Human gate</dt>
+                <dd>{workoutHelpStatus.humanGate}</dd>
+              </div>
+              <div>
+                <dt>Mode</dt>
+                <dd>{workoutHelpStatus.mode}</dd>
+              </div>
+              <div>
+                <dt>Cloud</dt>
+                <dd>{workoutHelpStatus.cloud}</dd>
+              </div>
+              <div>
+                <dt>Session</dt>
+                <dd>{workoutHelpStatus.session}</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
       )}
     </main>
   );
