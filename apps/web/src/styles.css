@@ -49,7 +49,37 @@ main { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0 3r
 .hero p { max-width: 720px; color: #cbd5e1; font-size: 1.05rem; }
 
 .eyebrow { color: #38bdf8; text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.78rem; font-weight: 900; margin: 0 0 0.35rem; }
-.status-pill { border: 1px solid rgba(148, 163, 184, 0.25); background: rgba(15, 23, 42, 0.78); border-radius: 999px; padding: 0.75rem 1rem; color: #cbd5e1; white-space: nowrap; }
+.hero-actions { display: flex; align-items: flex-start; gap: 0.75rem; }
+.status-pill { display: grid; gap: 0.15rem; border: 1px solid rgba(148, 163, 184, 0.25); background: rgba(15, 23, 42, 0.78); border-radius: 1rem; padding: 0.75rem 1rem; color: #cbd5e1; white-space: nowrap; }
+.status-pill span { color: #94a3b8; font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
+.status-pill strong { color: #e5e7eb; font-size: 0.92rem; }
+
+.auth-page {
+  width: min(960px, calc(100% - 2rem));
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  align-items: center;
+  gap: 1rem;
+}
+
+.auth-hero h1 {
+  max-width: 560px;
+  margin: 0.25rem 0 1rem;
+  font-size: clamp(2rem, 4vw, 4.2rem);
+  line-height: 1;
+}
+
+.auth-hero p {
+  max-width: 560px;
+  color: #cbd5e1;
+  font-size: 1.02rem;
+}
+
+.auth-card {
+  display: grid;
+  gap: 0.95rem;
+}
 
 .coach-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.75fr); gap: 1rem; align-items: stretch; }
 .video-card, .panel { border: 1px solid rgba(148, 163, 184, 0.22); background: rgba(15, 23, 42, 0.72); border-radius: 1.5rem; box-shadow: 0 24px 80px rgba(0,0,0,0.32); }
@@ -107,6 +137,7 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
 .status-list dd { margin: 0; color: #e5e7eb; }
 
 .lower-grid { display: grid; grid-template-columns: minmax(280px, 0.7fr) 1fr; gap: 1rem; margin-top: 1rem; align-items: start; }
+.lower-grid.history-only { grid-template-columns: 1fr; }
 .message { color: #fde68a; }
 .hint { color: #94a3b8; font-size: 0.92rem; }
 .history-list { display: grid; gap: 0.7rem; }
@@ -117,9 +148,11 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
 .history-set-list { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
 
 @media (max-width: 920px) {
-  .hero, .coach-grid, .lower-grid { grid-template-columns: 1fr; display: grid; }
+  .hero, .coach-grid, .lower-grid, .auth-page { grid-template-columns: 1fr; display: grid; }
   .hero { display: grid; }
+  .hero-actions { display: grid; }
   .status-pill { white-space: normal; }
+  .auth-page { align-content: center; }
 }
 
 .checkbox-row {
@@ -134,6 +167,12 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
 .checkbox-row input {
   width: auto;
   accent-color: #22c55e;
+}
+
+.remember-row {
+  justify-content: flex-start;
+  width: fit-content;
+  padding: 0.15rem 0;
 }
 
 button.start-set {

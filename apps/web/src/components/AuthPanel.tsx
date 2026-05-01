@@ -2,26 +2,26 @@ import { useState } from "react";
 import {
   getAppOrigin,
   getSupabaseClient,
-  isSupabaseConfigured
+  isSupabaseConfigured,
+  setAuthPersistencePreference,
+  shouldRememberAuthSession
 } from "../lib/supabaseClient";
-import type { SupabaseSession, SupabaseUser } from "../lib/supabaseClient";
 
 interface Props {
-  session: SupabaseSession | null;
-  user: SupabaseUser | null;
   recoveryMode: boolean;
+  onAuthenticated: () => void;
   onRecoveryComplete: () => void;
 }
 
 export function AuthPanel({
-  session,
-  user,
   recoveryMode,
+  onAuthenticated,
   onRecoveryComplete
 }: Props) {
   const [email, setEmail] = useState("demo@example.com");
   const [password, setPassword] = useState("demo-password-123");
   const [newPassword, setNewPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(shouldRememberAuthSession);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -45,6 +45,8 @@ export function AuthPanel({
 
   function login() {
     return runAuthAction(async () => {
+      setAuthPersistencePreference(rememberMe);
+
       const { error } = await getSupabaseClient().auth.signInWithPassword({
         email,
         password
@@ -52,11 +54,14 @@ export function AuthPanel({
 
       if (error) throw error;
       setMessage("Logged in.");
+      onAuthenticated();
     });
   }
 
   function register() {
     return runAuthAction(async () => {
+      setAuthPersistencePreference(rememberMe);
+
       const { error } = await getSupabaseClient().auth.signUp({
         email,
         password,
@@ -72,6 +77,8 @@ export function AuthPanel({
 
   function continueWithGoogle() {
     return runAuthAction(async () => {
+      setAuthPersistencePreference(rememberMe);
+
       const { error } = await getSupabaseClient().auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -129,7 +136,7 @@ export function AuthPanel({
 
   if (recoveryMode) {
     return (
-      <section className="panel">
+      <section className="panel auth-card">
         <p className="eyebrow">Password reset</p>
         <h2>Choose a new password</h2>
         <label>
@@ -152,29 +159,8 @@ export function AuthPanel({
     );
   }
 
-  if (session && user) {
-    return (
-      <section className="panel compact-panel">
-        <div>
-          <p className="eyebrow">Account</p>
-          <strong>{user.email ?? "Google account"}</strong>
-          <p className="hint">Workout history syncs to this account.</p>
-        </div>
-        <button
-          className="secondary"
-          onClick={() => runAuthAction(() => getSupabaseClient().auth.signOut().then(({ error }) => {
-            if (error) throw error;
-          }))}
-          disabled={loading}
-        >
-          Log out
-        </button>
-      </section>
-    );
-  }
-
   return (
-    <section className="panel">
+    <section className="panel auth-card">
       <p className="eyebrow">Account</p>
       <h2>Sign in to save history</h2>
 
@@ -198,6 +184,14 @@ export function AuthPanel({
           type="password"
           autoComplete="current-password"
         />
+      </label>
+      <label className="checkbox-row remember-row">
+        <input
+          checked={rememberMe}
+          onChange={(event) => setRememberMe(event.target.checked)}
+          type="checkbox"
+        />
+        Remember Me 🥺
       </label>
       <div className="button-row">
         <button onClick={login} disabled={loading}>
