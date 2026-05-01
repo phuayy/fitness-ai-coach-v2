@@ -103,15 +103,27 @@ export function useAdaptiveVideoLayout(
     );
 
     const compactLayout = viewport.width <= 920;
+    const phonePortrait =
+      viewport.width <= 560 && viewport.height > viewport.width;
     const landscapeViewport = viewport.width > viewport.height;
-    const viewportHeightRatio = compactLayout
-      ? landscapeViewport
-        ? 0.72
-        : 0.68
-      : 0.78;
+    const viewportHeightRatio = phonePortrait
+      ? frame.orientation === "portrait"
+        ? 0.62
+        : 0.42
+      : compactLayout
+        ? landscapeViewport
+          ? 0.72
+          : 0.64
+        : 0.78;
 
     const maxHeight = Math.max(
-      compactLayout ? 280 : 360,
+      phonePortrait
+        ? frame.orientation === "portrait"
+          ? 300
+          : 220
+        : compactLayout
+          ? 280
+          : 360,
       Math.min(viewport.height * viewportHeightRatio, 820)
     );
 
@@ -131,6 +143,7 @@ export function useAdaptiveVideoLayout(
     return {
       "--camera-aspect-ratio": `${frame.width} / ${frame.height}`,
       height: `${Math.round(height)}px`,
+      maxWidth: "100%",
       width: `${Math.round(width)}px`
     } as CSSProperties;
   }, [containerWidth, frame, viewport]);

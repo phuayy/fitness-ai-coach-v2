@@ -14,6 +14,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top left, rgba(14, 165, 233, 0.22), transparent 34rem),
     radial-gradient(circle at top right, rgba(34, 197, 94, 0.16), transparent 30rem),
@@ -59,7 +60,7 @@ main { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0 3r
   margin-bottom: 1.5rem;
 }
 
-.hero h1 { font-size: clamp(2rem, 4vw, 4.5rem); line-height: 0.95; margin: 0.2rem 0 1rem; letter-spacing: -0.06em; }
+.hero h1 { font-size: 3.75rem; line-height: 0.98; margin: 0.2rem 0 1rem; letter-spacing: 0; }
 .hero p { max-width: 720px; color: #cbd5e1; font-size: 1.05rem; }
 
 .eyebrow { color: #38bdf8; text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.78rem; font-weight: 900; margin: 0 0 0.35rem; }
@@ -80,7 +81,7 @@ main { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0 3r
 .auth-hero h1 {
   max-width: 560px;
   margin: 0.25rem 0 1rem;
-  font-size: clamp(2rem, 4vw, 4.2rem);
+  font-size: 3.5rem;
   line-height: 1;
 }
 
@@ -124,7 +125,7 @@ button.dashboard-module {
 
 .dashboard-module strong {
   display: block;
-  font-size: clamp(1.5rem, 3vw, 2.3rem);
+  font-size: 2rem;
   line-height: 1;
 }
 
@@ -300,15 +301,17 @@ button.dashboard-module {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: clamp(0.35rem, 1vw, 0.75rem);
+  padding: 0.75rem;
 }
 
 .video-shell {
   position: relative;
   flex: 0 1 auto;
   width: 100%;
+  max-width: 100%;
   aspect-ratio: var(--camera-aspect-ratio, 16 / 9);
   overflow: hidden;
   background: #020617;
@@ -374,6 +377,10 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
   .hero-actions { display: grid; }
   .status-pill { white-space: normal; }
   .auth-page { align-content: center; }
+  .hero h1,
+  .auth-hero h1 {
+    font-size: 2.5rem;
+  }
   .calendar-header,
   .calendar-filters,
   .calendar-session-card,
@@ -383,6 +390,127 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
 
   .calendar-header {
     display: grid;
+  }
+}
+
+@media (max-width: 560px) {
+  main {
+    width: min(100% - 1rem, 1180px);
+    padding: 1rem 0 2rem;
+  }
+
+  .hero {
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .hero h1,
+  .auth-hero h1 {
+    font-size: 2rem;
+    line-height: 1.04;
+  }
+
+  .hero p,
+  .auth-hero p {
+    font-size: 0.96rem;
+  }
+
+  .hero-actions {
+    gap: 0.55rem;
+  }
+
+  .hero-actions > button,
+  .status-pill {
+    width: 100%;
+  }
+
+  .dashboard-module {
+    min-height: 140px;
+  }
+
+  .dashboard-module strong {
+    font-size: 1.65rem;
+  }
+
+  .panel {
+    padding: 0.9rem;
+    border-radius: 1rem;
+  }
+
+  .video-card {
+    border-radius: 1rem;
+    padding: 0.4rem;
+  }
+
+  .video-shell {
+    border-radius: 0.75rem;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .metric-grid div {
+    padding: 0.65rem;
+    border-radius: 0.75rem;
+  }
+
+  .metric-grid span {
+    font-size: 0.72rem;
+  }
+
+  .metric-grid strong {
+    font-size: 1.35rem;
+  }
+
+  .button-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .button-row button {
+    width: 100%;
+  }
+
+  .feedback-box {
+    border-radius: 0.9rem;
+    padding: 0.85rem;
+  }
+
+  .calendar-weekdays {
+    gap: 0.2rem;
+  }
+
+  .calendar-weekdays span {
+    font-size: 0.64rem;
+  }
+
+  .calendar-grid {
+    gap: 0.22rem;
+  }
+
+  .calendar-day {
+    min-height: 3.15rem;
+    border-radius: 0.55rem;
+    padding: 0.35rem;
+  }
+
+  .calendar-day strong {
+    min-width: 1.15rem;
+    min-height: 1.15rem;
+    font-size: 0.68rem;
+  }
+
+  .set-review-modal {
+    max-height: calc(100dvh - 1rem);
+    border-radius: 1rem;
+    padding: 0.85rem;
+  }
+
+  .set-table th,
+  .set-table td {
+    padding: 0.65rem;
   }
 }
 
