@@ -6,6 +6,7 @@ import {
   setAuthPersistencePreference,
   shouldRememberAuthSession
 } from "../lib/supabaseClient";
+import googleSignInLogo from "../../../../visual_elements/logos/google_sign_in_logo_transparent.png";
 
 interface Props {
   recoveryMode: boolean;
@@ -164,7 +165,17 @@ export function AuthPanel({
       <p className="eyebrow">Account</p>
       <h2>Sign in to save history</h2>
 
-      <button onClick={continueWithGoogle} disabled={loading}>
+      <button
+        className="google-login-button"
+        onClick={continueWithGoogle}
+        disabled={loading}
+      >
+        <img
+          className="google-login-logo"
+          src={googleSignInLogo}
+          alt=""
+          aria-hidden="true"
+        />
         Continue with Google
       </button>
 

@@ -35,6 +35,20 @@ button {
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 button.secondary { background: rgba(148, 163, 184, 0.18); color: #e5e7eb; border: 1px solid rgba(148, 163, 184, 0.25); }
 
+.google-login-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+}
+
+.google-login-logo {
+  width: 1.25rem;
+  height: 1.25rem;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
 main { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 2rem 0 3rem; }
 
 .hero {
@@ -178,6 +192,16 @@ input, select { width: 100%; border: 1px solid rgba(148, 163, 184, 0.25); backgr
 button.start-set {
   background: #22c55e;
   color: #020617;
+}
+
+button.start-session {
+  background: #38bdf8;
+  color: #020617;
+}
+
+button.finish-session {
+  background: #f59e0b;
+  color: #111827;
 }
 
 button.stop-set {

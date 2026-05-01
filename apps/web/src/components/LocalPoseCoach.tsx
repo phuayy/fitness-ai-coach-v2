@@ -249,6 +249,7 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
   const [cloudStatus, setCloudStatus] = useState("Cloud history waiting for login.");
 
   const [sessionActive, setSessionActive] = useState(false);
+  const [sessionTransitioning, setSessionTransitioning] = useState(false);
   const [setActive, setSetActive] = useState(false);
   const [setRows, setSetRows] = useState<SetRecord[]>([]);
   const [nextSetNumber, setNextSetNumber] = useState(1);
@@ -1121,6 +1122,22 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
     );
   }
 
+  async function toggleSession() {
+    if (sessionTransitioning) return;
+
+    setSessionTransitioning(true);
+
+    try {
+      if (sessionActiveRef.current) {
+        await finishLocalSession();
+      } else {
+        await startLocalSession();
+      }
+    } finally {
+      setSessionTransitioning(false);
+    }
+  }
+
   function deleteSet(id: string) {
     const deletedRow = setRowsRef.current.find((row) => row.id === id);
     if (deletedRow) revokeSetVideo(deletedRow);
@@ -1242,24 +1259,27 @@ export function LocalPoseCoach({ userId, onHistoryChanged }: Props) {
           </div>
 
           <div className="button-row">
-            <button onClick={startLocalSession} disabled={sessionActive || !userId}>
-              Start session
+            <button
+              className={sessionActive ? "finish-session" : "start-session"}
+              onClick={toggleSession}
+              disabled={!userId || sessionTransitioning}
+              aria-pressed={sessionActive}
+            >
+              {sessionTransitioning
+                ? sessionActive
+                  ? "Finishing..."
+                  : "Starting..."
+                : sessionActive
+                  ? "Finish Session"
+                  : "Start Session"}
             </button>
 
             <button
               className={setActive ? "stop-set" : "start-set"}
               onClick={toggleSet}
-              disabled={!sessionActive}
+              disabled={!sessionActive || sessionTransitioning}
             >
               {setActive ? "Stop Set" : "Start Set"}
-            </button>
-
-            <button
-              className="secondary"
-              onClick={finishLocalSession}
-              disabled={!sessionActive}
-            >
-              Finish Session
             </button>
           </div>
 
