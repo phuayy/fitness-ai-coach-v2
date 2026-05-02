@@ -8,6 +8,7 @@ import type { CloudWorkoutSession } from "../types";
 interface Props {
   refreshKey: number;
   onStartWorkout: () => void;
+  onOpenSettings: () => void;
 }
 
 type CalendarDay = {
@@ -80,7 +81,7 @@ function buildMonthDays(
   });
 }
 
-export function Dashboard({ refreshKey, onStartWorkout }: Props) {
+export function Dashboard({ refreshKey, onStartWorkout, onOpenSettings }: Props) {
   const today = useMemo(() => new Date(), []);
   const [displayMonth, setDisplayMonth] = useState(today.getMonth());
   const [displayYear, setDisplayYear] = useState(today.getFullYear());
@@ -214,6 +215,15 @@ export function Dashboard({ refreshKey, onStartWorkout }: Props) {
             will arrive here.
           </span>
         </section>
+
+        <button
+          className="dashboard-module settings-module"
+          onClick={onOpenSettings}
+        >
+          <span className="eyebrow">Preferences</span>
+          <strong>Settings</strong>
+          <span>Manage animation effects and account-level app behavior.</span>
+        </button>
 
         <section className="panel calendar-module">
           <div className="calendar-content">

@@ -263,6 +263,20 @@ export async function getOldestWorkoutSessionYear(): Promise<number | null> {
   return new Date(data[0].started_at).getFullYear();
 }
 
+export async function getLatestWorkoutSessionDate(): Promise<string | null> {
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("workout_sessions")
+    .select("started_at")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .returns<StartedAtRow[]>();
+
+  if (error) throw error;
+  return data[0]?.started_at ?? null;
+}
+
 export async function listWorkoutHistory(
   options: ListWorkoutHistoryOptions = {}
 ): Promise<CloudWorkoutSession[]> {

@@ -1,15 +1,29 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthPanel } from "./components/AuthPanel";
 import { Dashboard } from "./components/Dashboard";
 import { LocalPoseCoach } from "./components/LocalPoseCoach";
+import { SettingsPage } from "./components/SettingsPage";
 import { SessionHistory } from "./components/SessionHistory";
+import { TimedMediaOverlay } from "./components/TimedMediaOverlay";
+import {
+  pickAnimationAsset,
+  type AnimationAsset
+} from "./lib/animationRegistry";
 import {
   clearSupabaseAuthStorage,
   isSupabaseConfigured,
   supabase
 } from "./lib/supabaseClient";
+import {
+  getUserAnimationPreferences,
+  hasAnimationImpression,
+  recordAnimationImpression
+} from "./services/animationPreferences";
+import { getLatestWorkoutSessionDate } from "./services/workoutHistory";
 import type { SupabaseSession } from "./lib/supabaseClient";
 import type { WorkoutHelpStatus } from "./types";
+
+const TRASH_TALK_MISSED_DAYS_TRIGGER = "trash_talk_missed_days";
 
 const DEFAULT_WORKOUT_HELP_STATUS: WorkoutHelpStatus = {
   camera: "Device in use",
@@ -27,12 +41,17 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [loggingOut, setLoggingOut] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [animationsEnabled, setAnimationsEnabled] = useState(true);
+  const [activeAnimation, setActiveAnimation] = useState<AnimationAsset | null>(
+    null
+  );
   const [workoutHelpStatus, setWorkoutHelpStatus] =
     useState<WorkoutHelpStatus>(DEFAULT_WORKOUT_HELP_STATUS);
   const [authStatus, setAuthStatus] = useState(
     isSupabaseConfigured ? "Restoring account..." : "Supabase not configured"
   );
   const [historyRefresh, setHistoryRefresh] = useState(0);
+  const animationChecksRef = useRef(new Set<string>());
 
   function navigate(path: string) {
     window.history.pushState(null, "", path);
@@ -51,6 +70,34 @@ export default function App() {
         : status
     );
   }, []);
+
+  function localDateKey(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function localDayDifference(later: Date, earlier: Date): number {
+    const laterStart = new Date(
+      later.getFullYear(),
+      later.getMonth(),
+      later.getDate()
+    );
+    const earlierStart = new Date(
+      earlier.getFullYear(),
+      earlier.getMonth(),
+      earlier.getDate()
+    );
+
+    return Math.floor(
+      (laterStart.getTime() - earlierStart.getTime()) / 86_400_000
+    );
+  }
+
+  function prefersReducedMotion(): boolean {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
 
   useEffect(() => {
     if (!supabase) return;
@@ -118,6 +165,85 @@ export default function App() {
     }
   }, [authReady, routePath, session]);
 
+  useEffect(() => {
+    if (!session) {
+      setAnimationsEnabled(true);
+      animationChecksRef.current.clear();
+      return;
+    }
+
+    let cancelled = false;
+
+    getUserAnimationPreferences(session.user.id)
+      .then((preferences) => {
+        if (!cancelled) {
+          setAnimationsEnabled(preferences.animationsEnabled);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAnimationsEnabled(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  useEffect(() => {
+    if (!session || routePath !== "/" || !animationsEnabled || activeAnimation) {
+      return;
+    }
+
+    if (prefersReducedMotion()) return;
+
+    const today = new Date();
+    const todayKey = localDateKey(today);
+    const userId = session.user.id;
+    const checkKey = `${userId}:${TRASH_TALK_MISSED_DAYS_TRIGGER}:${todayKey}`;
+
+    if (animationChecksRef.current.has(checkKey)) return;
+    animationChecksRef.current.add(checkKey);
+
+    let cancelled = false;
+
+    async function runMissedDaysCheck() {
+      const latestStartedAt = await getLatestWorkoutSessionDate();
+      if (!latestStartedAt) return;
+
+      const missedDays = localDayDifference(today, new Date(latestStartedAt));
+      if (missedDays < 1) return;
+
+      const alreadyShown = await hasAnimationImpression(
+        userId,
+        TRASH_TALK_MISSED_DAYS_TRIGGER,
+        todayKey
+      );
+      if (alreadyShown || cancelled) return;
+
+      const asset = pickAnimationAsset("trash_talk");
+      if (!asset) return;
+
+      await recordAnimationImpression(
+        userId,
+        TRASH_TALK_MISSED_DAYS_TRIGGER,
+        todayKey,
+        { missedDays, latestStartedAt, assetId: asset.id }
+      );
+
+      if (!cancelled) {
+        setActiveAnimation(asset);
+      }
+    }
+
+    runMissedDaysCheck().catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAnimation, animationsEnabled, historyRefresh, routePath, session]);
+
   function finishLoginFlow() {
     if (window.location.pathname !== "/") {
       navigate("/");
@@ -182,16 +308,27 @@ export default function App() {
   }
 
   const isWorkoutRoute = routePath === "/workout";
+  const isSettingsRoute = routePath === "/settings";
 
   return (
     <main>
       <header className="hero">
         <div>
           <p className="eyebrow">
-            {isWorkoutRoute ? "Workout session" : "Dashboard"}
+            {isWorkoutRoute
+              ? "Workout session"
+              : isSettingsRoute
+                ? "Settings"
+                : "Dashboard"}
           </p>
-          <h1>{isWorkoutRoute ? "Local Pose Coach" : "Fitness AI Dashboard"}</h1>
-          {!isWorkoutRoute && (
+          <h1>
+            {isWorkoutRoute
+              ? "Local Pose Coach"
+              : isSettingsRoute
+                ? "App Settings"
+                : "Fitness AI Dashboard"}
+          </h1>
+          {!isWorkoutRoute && !isSettingsRoute && (
             <p>
               Start a workout, review your training calendar, and keep progress
               tied to your account.
@@ -203,14 +340,16 @@ export default function App() {
             <span>{authStatus}</span>
             <strong>{session.user.email ?? "Google account"}</strong>
           </div>
-          {isWorkoutRoute && (
+          {(isWorkoutRoute || isSettingsRoute) && (
             <>
               <button className="secondary" onClick={() => navigate("/")}>
                 Dashboard
               </button>
-              <button className="secondary" onClick={() => setHelpOpen(true)}>
-                Help
-              </button>
+              {isWorkoutRoute && (
+                <button className="secondary" onClick={() => setHelpOpen(true)}>
+                  Help
+                </button>
+              )}
             </>
           )}
           <button className="secondary" onClick={logout} disabled={loggingOut}>
@@ -231,10 +370,18 @@ export default function App() {
             <SessionHistory enabled={Boolean(session)} refreshKey={historyRefresh} />
           </div>
         </>
+      ) : isSettingsRoute ? (
+        <SettingsPage
+          userId={session.user.id}
+          animationsEnabled={animationsEnabled}
+          onAnimationsEnabledChange={setAnimationsEnabled}
+          onBackToDashboard={() => navigate("/")}
+        />
       ) : (
         <Dashboard
           refreshKey={historyRefresh}
           onStartWorkout={() => navigate("/workout")}
+          onOpenSettings={() => navigate("/settings")}
         />
       )}
 
@@ -287,6 +434,13 @@ export default function App() {
             </dl>
           </section>
         </div>
+      )}
+
+      {activeAnimation && (
+        <TimedMediaOverlay
+          asset={activeAnimation}
+          onDone={() => setActiveAnimation(null)}
+        />
       )}
     </main>
   );
